@@ -3,6 +3,7 @@
 // never decides to run one on its own. Output streams into the log so the user can see exactly what ran.
 import Foundation
 import CryptoKit
+import Compression
 
 // MARK: - Tool locations and running
 
@@ -16,7 +17,7 @@ enum Tools {
             .compactMap({ $0 as? String }).first(where: { ($0 as NSString).lastPathComponent == "tsschecker" }) {
             candidates.insert("\(vendor.path)/tsschecker-new/\(found)", at: 0)
         }
-        candidates += ["\(vendor.path)/tsschecker/\(name)", "\(vendor.path)/futurerestore/\(name)",
+        candidates += ["\(vendor.path)/bin/\(name)", "\(vendor.path)/tsschecker/\(name)", "\(vendor.path)/futurerestore/\(name)",
                        "\(vendor.path)/idevicerestore/src/\(name)"]
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
@@ -63,6 +64,80 @@ enum Tools {
     static func percent(in line: String) -> Double? {
         guard let r = line.range(of: #"(\d{1,3})%"#, options: .regularExpression) else { return nil }
         return Double(line[r].dropLast()).map { $0 / 100 }
+    }
+}
+
+// MARK: - BuildManifest straight out of a remote IPSW (HTTP ranges, so 12 GB is never downloaded)
+
+enum ManifestFetcher {
+    struct ZipError: Error, CustomStringConvertible { let description: String }
+
+    static func fetch(ipsw: URL, member: String = "BuildManifest.plist") async throws -> Data {
+        var head = URLRequest(url: ipsw); head.httpMethod = "HEAD"
+        let (_, hr) = try await URLSession.shared.data(for: head)
+        guard let size = (hr as? HTTPURLResponse).flatMap({ Int($0.value(forHTTPHeaderField: "Content-Length") ?? "") }), size > 0 else {
+            throw ZipError(description: "no Content-Length for \(ipsw.lastPathComponent)")
+        }
+        func range(_ a: Int, _ b: Int) async throws -> Data {
+            var r = URLRequest(url: ipsw); r.setValue("bytes=\(a)-\(b)", forHTTPHeaderField: "Range")
+            return try await URLSession.shared.data(for: r).0
+        }
+        func u16(_ d: Data, _ o: Int) -> Int { Int(d[d.startIndex + o]) | Int(d[d.startIndex + o + 1]) << 8 }
+        func u32(_ d: Data, _ o: Int) -> Int { u16(d, o) | u16(d, o + 2) << 16 }
+        func u64(_ d: Data, _ o: Int) -> Int { u32(d, o) | u32(d, o + 4) << 32 }
+
+        let tail = try await range(max(0, size - 66000), size - 1)
+        guard let eocd = tail.lastRange(of: Data([0x50, 0x4b, 0x05, 0x06]))?.lowerBound else { throw ZipError(description: "no zip directory") }
+        let e = eocd - tail.startIndex
+        var cdCount = u16(tail, e + 10), cdSize = u32(tail, e + 12), cdOff = u32(tail, e + 16)
+        if cdCount == 0xFFFF || cdSize == 0xFFFFFFFF || cdOff == 0xFFFFFFFF {
+            guard let loc = tail.lastRange(of: Data([0x50, 0x4b, 0x06, 0x07]))?.lowerBound else { throw ZipError(description: "no zip64 locator") }
+            let z64Off = u64(tail, loc - tail.startIndex + 8)
+            let z64 = try await range(z64Off, z64Off + 55)
+            cdCount = u64(z64, 32); cdSize = u64(z64, 40); cdOff = u64(z64, 48)
+        }
+        let cd = try await range(cdOff, cdOff + cdSize - 1)
+        var pos = 0
+        while pos + 46 <= cd.count {
+            guard u32(cd, pos) == 0x02014b50 else { break }
+            let method = u16(cd, pos + 10)
+            var csize = u32(cd, pos + 20), usize = u32(cd, pos + 24)
+            let nlen = u16(cd, pos + 28), elen = u16(cd, pos + 30), clen = u16(cd, pos + 32)
+            var lho = u32(cd, pos + 42)
+            let name = String(data: cd.subdata(in: cd.startIndex + pos + 46 ..< cd.startIndex + pos + 46 + nlen), encoding: .utf8) ?? ""
+            if csize == 0xFFFFFFFF || usize == 0xFFFFFFFF || lho == 0xFFFFFFFF {
+                var x = pos + 46 + nlen
+                let end = x + elen
+                while x + 4 <= end {
+                    let hid = u16(cd, x), hlen = u16(cd, x + 2)
+                    if hid == 1 {
+                        var o = x + 4
+                        if usize == 0xFFFFFFFF { usize = u64(cd, o); o += 8 }
+                        if csize == 0xFFFFFFFF { csize = u64(cd, o); o += 8 }
+                        if lho == 0xFFFFFFFF { lho = u64(cd, o) }
+                    }
+                    x += 4 + hlen
+                }
+            }
+            if name == member {
+                let lh = try await range(lho, lho + 29)
+                let start = lho + 30 + u16(lh, 26) + u16(lh, 28)
+                let raw = try await range(start, start + csize - 1)
+                if method == 0 { return raw }
+                guard method == 8 else { throw ZipError(description: "unsupported compression \(method)") }
+                var out = Data(count: usize)
+                let n = out.withUnsafeMutableBytes { dst in
+                    raw.withUnsafeBytes { src in
+                        compression_decode_buffer(dst.bindMemory(to: UInt8.self).baseAddress!, usize,
+                                                  src.bindMemory(to: UInt8.self).baseAddress!, raw.count, nil, COMPRESSION_ZLIB)
+                    }
+                }
+                guard n == usize else { throw ZipError(description: "inflate failed") }
+                return out
+            }
+            pos += 46 + nlen + elen + clen
+        }
+        throw ZipError(description: "\(member) not in the archive")
     }
 }
 
@@ -227,6 +302,9 @@ final class FirmwareService: ObservableObject {
     var log: (String) -> Void = { _ in }
 
     static let generator = "0x1111111111111111"      // the community convention; set this on the phone before a futurerestore
+    static func validGenerator(_ g: String) -> Bool {
+        g.count == 18 && g.lowercased().hasPrefix("0x") && g.dropFirst(2).allSatisfy { $0.isHexDigit }
+    }
     /// ApNonce an A12+ chip derives from that generator: SHA-384 of the eight generator bytes, first 32 bytes.
     static var generatorNonce: String {
         let bytes = Data([0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11])
@@ -269,28 +347,34 @@ final class FirmwareService: ObservableObject {
     /// Versions tsschecker itself reported as signed or unsigned; Apple's TSS is the truth, ipsw.me can lag.
     @Published var verdicts: [String: Bool] = [:]
 
-    func saveBlobs(ecid: String, productType: String, board: String, basebandSerial: String, root: URL) async {
-        guard !running, Tools.has("tsschecker") else { log("tsschecker is not installed; blobs not saved"); return }
+    func saveBlobs(ecid: String, productType: String, board: String, basebandSerial: String, basebandCert: String, root: URL, generator: String = FirmwareService.generator) async {
+        guard !running, Tools.has("decant-tss") else { log("The blob saver is missing from this build"); return }
         running = true; phase = "Saving SHSH blobs"; progress = nil
         let dir = Self.blobDir(root, ecid: ecid)
+        let manifests = root.appendingPathComponent("Manifests")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        // Try the versions ipsw.me calls signed plus the two newest, in case its flags are stale either way.
+        try? FileManager.default.createDirectory(at: manifests, withIntermediateDirectories: true)
+        // Ask Apple about what ipsw.me calls signed plus the two newest builds; Apple's answer is what counts.
         var candidates = firmwares.filter { $0.signed }
         for fw in firmwares.prefix(2) where !candidates.contains(fw) { candidates.append(fw) }
         var saved = 0
         for fw in candidates {
-            var args = ["-d", productType, "-B", board, "-e", ecid, "-i", fw.version, "--buildid", fw.buildid,
-                        "-s", "--save-path", dir.path, "-g", Self.generator, "--apnonce", Self.generatorNonce]
-            if !basebandSerial.isEmpty { args += ["--bbsnum", basebandSerial] } else { args.append("--no-baseband") }
-            var signedNow: Bool?
-            await Tools.stream("tsschecker", args) { [weak self] l in
-                if l.contains("IS NOT signed") || l.contains("IS NOT being signed") { signedNow = false }
-                else if l.contains("IS signed") || l.contains("IS being signed") { signedNow = true }
-                if l.lowercased().contains("saved") || l.contains("Error") || l.contains("TSS server returned") { self?.log(l) }
+            let manifest = manifests.appendingPathComponent("\(productType)_\(fw.buildid).plist")
+            if !FileManager.default.fileExists(atPath: manifest.path) {
+                phase = "Reading the iOS \(fw.version) manifest"
+                do { try (try await ManifestFetcher.fetch(ipsw: fw.url)).write(to: manifest) }
+                catch { log("Could not read the manifest for iOS \(fw.version): \(error)"); continue }
             }
-            if let v = signedNow { verdicts[fw.buildid] = v }
-            if signedNow == true { saved += 1; log("Blob saved for iOS \(fw.version) (\(fw.buildid))") }
-            else if signedNow == false { log("iOS \(fw.version) (\(fw.buildid)) is no longer signed, no blob") }
+            phase = "Asking Apple about iOS \(fw.version)"
+            let out = dir.appendingPathComponent("\(ecid)_\(productType)_\(board)_\(fw.version)-\(fw.buildid)_\(generator).shsh2")
+            var args = ["--manifest", manifest.path, "--board", board, "--ecid", ecid, "--generator", generator, "--out", out.path]
+            if !basebandSerial.isEmpty && !basebandCert.isEmpty { args += ["--bbsnum", basebandSerial, "--bbcert", basebandCert] }
+            let status = await Tools.stream("decant-tss", args) { [weak self] l in if l.contains("error") { self?.log(l) } }
+            switch status {
+            case 0: verdicts[fw.buildid] = true; saved += 1; log("Blob saved for iOS \(fw.version) (\(fw.buildid))")
+            case 3: verdicts[fw.buildid] = false; log("iOS \(fw.version) (\(fw.buildid)) is no longer signed")
+            default: log("Blob request for iOS \(fw.version) failed")
+            }
         }
         phase = saved > 0 ? "Blobs saved for \(saved) version\(saved == 1 ? "" : "s")" : "No signed version to save blobs for"
         running = false

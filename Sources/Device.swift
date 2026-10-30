@@ -55,7 +55,7 @@ struct OffloadOptions {
 
 struct DeviceInfo {
     var manufacturer = "", model = "", version = "", serial = ""
-    var modelNumber = "", region = "", udid = "", hardware = "", ecid = "", basebandSerial = ""
+    var modelNumber = "", region = "", udid = "", hardware = "", ecid = "", basebandSerial = "", basebandCert = ""
     var marketingName: String { DeviceInfo.names[model] ?? model }
     static let names: [String: String] = [
         "iPhone12,1": "iPhone 11", "iPhone12,3": "iPhone 11 Pro", "iPhone12,5": "iPhone 11 Pro Max", "iPhone12,8": "iPhone SE (2nd gen)",
@@ -556,6 +556,7 @@ final class DeviceManager: NSObject, ObservableObject {
                     inf.hardware = g["HardwareModel"] as? String ?? ""
                     if let e = g["UniqueChipID"] as? Int { inf.ecid = String(e) }
                     if let bb = g["BasebandSerialNumber"] as? Data { inf.basebandSerial = bb.map { String(format: "%02x", $0) }.joined() }
+                    if let c = g["BasebandGoldCertId"] as? Int { inf.basebandCert = String(c) }
                     if !inf.model.isEmpty {
                         self.info = inf
                         self.addLog("\(inf.marketingName) (\(inf.model)), iOS \(inf.version)")

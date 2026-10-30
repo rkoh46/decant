@@ -28,12 +28,13 @@ confirmation in the UI.
    from the bundle.
 3. **Firmware** tab: done in the UI; needs `tsschecker`, `idevicerestore`, `irecovery` and `futurerestore`
    present (vendored or bundled) to light up. Still to verify end to end on a spare device.
-   - **tsschecker must be a 2026 build.** Release 444 (Oct 2025) builds iOS 27 requests without the new
-     `Yonkers,SysTopPatch*` and `eUICC` components, and Apple's TSS answers `STATUS=168 An internal error
-     occurred`, which tsschecker reports as "not signed". Use the CI build from `gh run download -R
-     1Conan/tsschecker <run>` (macOS RELEASE artifact). Also required for A12+ devices: `--bbsnum` (baseband
-     serial from lockdown, base64 → hex) and, with a generator, the matching ApNonce (SHA-384 of the generator
-     bytes, first 32 bytes).
+   - **Blob saver is Decant's own: `tools/decant-tss.c` on libtatsu.** tsschecker (release 444, Oct 2025)
+     builds iOS 27 requests Apple rejects with `STATUS=168 An internal error occurred` and reports that as "not
+     signed"; its CI only produces Linux builds, and blobsaver's last release is from 2023. libtatsu (the TSS
+     library idevicerestore uses) is current, so decant-tss builds the request from the BuildManifest (fetched
+     with HTTP range requests, 400 KB out of a 12 GB IPSW: `ManifestFetcher`), the ECID, the generator's
+     ApNonce (SHA-384 of the 8 generator bytes, first 32), the baseband serial and gold-cert id from lockdown,
+     and saves the response with the generator as `.shsh2`. Verified 2026-10-30: 27.2 and 27.0.1 signed.
    - **SHSH blobs**: saved automatically each time the phone connects, for every version Apple is signing, with
      the generator `0x1111111111111111` (so a future restore can set a matching nonce) and the device's current
      APNonce when available. Stored per ECID under `OS_Backups/Decant/Blobs/<ECID>/`. List saved blobs, verify
@@ -54,6 +55,15 @@ confirmation in the UI.
    download, upload, delete, with sizes and dates.
 6. **More device tools**: crash reports (`idevicecrashreport`), live system log (`idevicesyslog`) with filter,
    screenshot (`idevicescreenshot`, needs Developer Mode on iOS 17+), provisioning profiles, wallpaper.
+
+## Windows
+
+A separate app sharing the same engine pieces: decant-tss (plain C, builds on Windows), the libimobiledevice
+tools (Windows builds exist), idevicerestore and futurerestore (Windows builds exist). What does not carry over:
+the camera-roll reader (ImageCaptureCore) becomes AFC over `afcclient` or Windows' portable-device API; the
+iCloud-delete route (PhotoKit) has no Windows equivalent, so with iCloud Photos on, deletes must go through
+Apple's own apps. Windows needs Apple's USB driver, which only ships with iTunes or the Apple Devices app and
+cannot be bundled. UI in WinUI 3 (C#), same DESIGN.md. All testing happens on the Mac first.
 
 ## Not planned
 

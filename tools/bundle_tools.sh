@@ -21,10 +21,10 @@ copy_tool() {   # copy_tool <path>
   copied+=("$name")
 }
 
+[ -x "$HELPERS/decant-tss" ] && copied+=(decant-tss)
 for t in "${TOOLS[@]}"; do copy_tool "$BREW/$t"; done
 copy_tool "$BREW/irecovery"
 copy_tool "$VENDOR/idevicerestore/src/idevicerestore"
-copy_tool "$VENDOR/tsschecker/tsschecker"
 copy_tool "$VENDOR/futurerestore/futurerestore"
 
 # Pull in every non-system dylib each binary needs, recursively, and point the binaries at the bundled copies.
@@ -47,14 +47,15 @@ for t in "${copied[@]}"; do bundle_libs "$HELPERS/$t"; done
   echo "# Third-party notices"
   echo
   echo "Decant bundles these tools unchanged, each under its own licence. Sources: libimobiledevice.org,"
-  echo "github.com/libimobiledevice/idevicerestore, github.com/1Conan/tsschecker, github.com/futurerestore/futurerestore."
+  echo "github.com/libimobiledevice/idevicerestore, github.com/futurerestore/futurerestore; the blob saver decant-tss is Decant's own code on libtatsu."
   echo
   for t in "${copied[@]}"; do echo "- $t"; done
   echo
   for f in /opt/homebrew/opt/libimobiledevice/COPYING* /opt/homebrew/opt/libirecovery/COPYING* vendor/idevicerestore/COPYING* ; do
     [ -f "$f" ] && { echo; echo "## $(basename "$(dirname "$(dirname "$f")")")"; echo; echo '```'; cat "$f"; echo '```'; }
   done
-  echo; echo "## tsschecker and futurerestore"; echo; echo "GNU Lesser General Public License v3.0, see https://www.gnu.org/licenses/lgpl-3.0.txt"
+  echo; echo "## futurerestore"; echo; echo "GNU Lesser General Public License v3.0, see https://www.gnu.org/licenses/lgpl-3.0.txt"
+  echo; echo "## libtatsu, libplist"; echo; echo "GNU Lesser General Public License v2.1, see https://www.gnu.org/licenses/lgpl-2.1.txt"
 } > "$APP/Contents/Resources/THIRD-PARTY-NOTICES.md"
 
 for t in "${copied[@]}"; do codesign --force -s - "$HELPERS/$t" 2>/dev/null || true; done

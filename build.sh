@@ -15,6 +15,10 @@ build() {
   rm -rf "$BUILD"
   mkdir -p "$BUILD/Contents/MacOS" "$BUILD/Contents/Resources"
   echo ">> building app binary"
+  echo ">> building decant-tss (blob saver on libtatsu)"
+  mkdir -p "$BUILD/Contents/Helpers"
+  clang -O2 -Wno-unused-result -o "$BUILD/Contents/Helpers/decant-tss" tools/decant-tss.c \
+    -I/opt/homebrew/include -L/opt/homebrew/lib -ltatsu -lplist-2.0 -framework Security
   swiftc -O -parse-as-library -o "$BUILD/Contents/MacOS/Decant" Sources/*.swift \
     -framework SwiftUI -framework AppKit -framework ImageCaptureCore -framework AVKit -framework Photos
   if [ ! -f Decant.icns ]; then

@@ -159,6 +159,7 @@ struct FirmwarePane: View {
     @EnvironmentObject var firmware: FirmwareService
     @AppStorage("firmwareRoot") private var firmwareRoot = FirmwareService.defaultRoot.path
     @AppStorage("autoSaveBlobs") private var autoSaveBlobs = true
+    @AppStorage("blobGenerator") private var generator = FirmwareService.generator
     @State private var restoreTarget: (fw: Firmware, erase: Bool, future: Bool)?
     @State private var confirmStep = 0
     @State private var revealECID = false
@@ -205,8 +206,8 @@ struct FirmwarePane: View {
             await firmware.loadSigning(productType: model)
             firmware.scanBlobs(root: root, ecid: ecid)
             await firmware.refreshMode()
-            if autoSaveBlobs && !ecid.isEmpty && !board.isEmpty && Tools.has("tsschecker") {
-                await firmware.saveBlobs(ecid: ecid, productType: model, board: board, basebandSerial: manager.info?.basebandSerial ?? "", root: root)
+            if autoSaveBlobs && !ecid.isEmpty && !board.isEmpty && Tools.has("decant-tss") && FirmwareService.validGenerator(generator) {
+                await firmware.saveBlobs(ecid: ecid, productType: model, board: board, basebandSerial: manager.info?.basebandSerial ?? "", basebandCert: manager.info?.basebandCert ?? "", root: root, generator: generator)
             }
         }
     }
@@ -241,6 +242,19 @@ struct FirmwarePane: View {
                     Button("Change…", action: chooseRoot).buttonStyle(.link)
                 }
                 .font(.system(size: 13))
+                HStack(spacing: 8) {
+                    Text("Generator").foregroundStyle(.secondary).frame(width: 112, alignment: .leading)
+                    TextField("0x1111111111111111", text: $generator).textFieldStyle(.roundedBorder).monospaced().frame(width: 190)
+                    if !FirmwareService.validGenerator(generator) {
+                        Text("Needs 0x and 16 hex digits").foregroundStyle(Tone.warning)
+                    } else if generator != FirmwareService.generator {
+                        Button("Use the default") { generator = FirmwareService.generator }.buttonStyle(.link)
+                    } else {
+                        Text("The convention every guide and tool uses; a blob only works if the phone is set to the same value").foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .font(.system(size: 13))
                 if firmware.running {
                     HStack(spacing: 12) {
                         ProgressView(value: firmware.progress ?? 0).frame(maxWidth: 360).opacity(firmware.progress == nil ? 0 : 1)
@@ -270,14 +284,14 @@ struct FirmwarePane: View {
             HStack {
                 Text("SHSH blobs").font(.system(size: 13)).foregroundStyle(.secondary)
                 Spacer()
-                Button("Save Blobs Now") { Task { await firmware.saveBlobs(ecid: ecid, productType: model, board: board, basebandSerial: manager.info?.basebandSerial ?? "", root: root) } }
-                    .controlSize(.small).disabled(!connected || firmware.running || !Tools.has("tsschecker"))
+                Button("Save Blobs Now") { Task { await firmware.saveBlobs(ecid: ecid, productType: model, board: board, basebandSerial: manager.info?.basebandSerial ?? "", basebandCert: manager.info?.basebandCert ?? "", root: root, generator: generator) } }
+                    .controlSize(.small).disabled(!connected || firmware.running || !Tools.has("decant-tss") || !FirmwareService.validGenerator(generator))
                 Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([FirmwareService.blobDir(root, ecid: ecid)]) }
                     .controlSize(.small).disabled(!connected)
             }
             Card {
-                if !Tools.has("tsschecker") {
-                    Text("tsschecker is not installed, so blobs cannot be saved yet").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 48)
+                if !Tools.has("decant-tss") {
+                    Text("This build has no blob saver").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 48)
                 } else if firmware.blobs.isEmpty {
                     Text(connected ? "No blobs saved for this iPhone yet" : "Connect an iPhone").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 48)
                 } else {
