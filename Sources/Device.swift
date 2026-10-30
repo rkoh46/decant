@@ -386,11 +386,25 @@ final class DeviceManager: NSObject, ObservableObject {
             for i in missing { i.status = .failed("not found in the Mac's Photos library") }
             if !missing.isEmpty { addLog("\(missing.count) items were not in the Mac's Photos library yet (iCloud still syncing?)") }
             addLog("Deleted \(deleted.count) through iCloud; the iPhone drops them when it syncs (Recently Deleted keeps them 30 days)")
+            scheduleRescan()
             return deleted.count
         } catch {
             addLog("iCloud delete failed: \(error.localizedDescription)")
             for i in items { i.status = .failed(error.localizedDescription) }
             return 0
+        }
+    }
+
+    /// After an iCloud delete the phone catches up on its own schedule: re-read it twice so the library shown
+    /// is the phone's, not our bookkeeping.
+    private func scheduleRescan() {
+        Task { @MainActor [weak self] in
+            for delay in [20, 60] {
+                try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000_000)
+                guard let self, self.device != nil, !self.running else { return }
+                self.addLog("Re-reading the iPhone after the iCloud delete")
+                self.refresh()
+            }
         }
     }
 
