@@ -1059,7 +1059,7 @@ struct ThumbCell: View {
         .opacity(item.status == .deleted ? 0.3 : 1)
         .onHover { hovering = $0 }
         .help(item.name)
-        .onAppear { if item.thumbnail == nil { item.file.requestThumbnail() } }
+        .onAppear { if item.thumbnail == nil && item.thumbnailTries <= 4 { item.file.requestThumbnail() } }
     }
 
     @ViewBuilder private var statusBadge: some View {

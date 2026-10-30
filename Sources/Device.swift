@@ -22,6 +22,7 @@ final class MediaItem: ObservableObject, Identifiable, Hashable {
     let pixelWidth: Int, pixelHeight: Int
     @Published var thumbnail: CGImage?
     @Published var status: Status = .pending
+    var thumbnailTries = 0
 
     init(_ file: ICCameraFile) {
         self.file = file
@@ -226,8 +227,10 @@ final class DeviceManager: NSObject, ObservableObject {
             }
             self.connectAttempts += 1
             self.addLog("Connection is taking too long, retrying (\(self.connectAttempts) of 3)")
-            if camera.hasOpenSession { camera.requestCloseSession() }
-            self.openSession(camera)
+            DispatchQueue.main.async {
+                if camera.hasOpenSession { camera.requestCloseSession() }
+                self.openSession(camera)
+            }
         }
     }
 
@@ -749,7 +752,20 @@ extension DeviceManager: ICCameraDeviceDelegate {
     func cameraDevice(_ camera: ICCameraDevice, didReceivePTPEvent eventData: Data) {}
 
     func cameraDevice(_ camera: ICCameraDevice, didReceiveThumbnail thumbnail: CGImage?, for item: ICCameraItem, error: Error?) {
-        byFile[ObjectIdentifier(item)]?.thumbnail = thumbnail
+        guard let media = byFile[ObjectIdentifier(item)] else { return }
+        if let thumbnail {
+            media.thumbnail = thumbnail
+            return
+        }
+        // Right after a reconnect or a delete the phone answers some requests with nothing; ask again, spaced out.
+        media.thumbnailTries += 1
+        guard media.thumbnailTries <= 4 else { return }
+        let delay = UInt64(media.thumbnailTries) * 1_500_000_000
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard let self, self.device === camera, self.byFile[ObjectIdentifier(item)] != nil else { return }
+            item.requestThumbnail()
+        }
     }
 
     func cameraDevice(_ camera: ICCameraDevice, didReceiveMetadata metadata: [AnyHashable: Any]?, for item: ICCameraItem, error: Error?) {}
