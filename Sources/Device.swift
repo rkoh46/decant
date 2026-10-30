@@ -72,7 +72,7 @@ struct DeviceInfo {
     ]
 }
 
-struct DeviceStorage { var capacity: Int; var free: Int; var photos: Int? = nil; var apps: Int? = nil }
+struct DeviceStorage { var capacity: Int; var free: Int; var photos: Int? = nil; var apps: Int? = nil; var system: Int? = nil }
 
 /// What the connected model looks like from the front, derived from its identifier (iPhone16,2 ...).
 struct PhoneStyle {
@@ -111,6 +111,8 @@ struct PhoneStyle {
 struct BatteryInfo {
     var level: Int?, charging: Bool?
     var cycleCount: Int?, designCapacity: Int?, maxCapacity: Int?
+    var temperature: Double?    // °C
+    var voltage: Double?        // V
     var health: Double? {
         guard let d = designCapacity, let m = maxCapacity, d > 0 else { return nil }
         return Double(m) / Double(d) * 100
@@ -305,7 +307,7 @@ final class DeviceManager: NSObject, ObservableObject {
 
     /// Newest photos shown on the rendered phone's screen.
     var screenItems: [MediaItem] {
-        Array(items.filter { !$0.isVideo }.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }.prefix(12))
+        Array(items.filter { !$0.isVideo }.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }.prefix(18))
     }
 
     // MARK: Preview
@@ -634,6 +636,8 @@ final class DeviceManager: NSObject, ObservableObject {
         b.cycleCount = find("CycleCount", in: diag)
         b.designCapacity = find("DesignCapacity", in: diag)
         b.maxCapacity = find("NominalChargeCapacity", in: diag) ?? find("AppleRawMaxCapacity", in: diag)
+        if let t = find("Temperature", in: diag) { b.temperature = Double(t) / 100 }
+        if let v = find("Voltage", in: diag) { b.voltage = Double(v) / 1000 }
         if b.level != nil || b.cycleCount != nil { battery = b }
     }
 
@@ -641,7 +645,8 @@ final class DeviceManager: NSObject, ObservableObject {
         if let d, let cap = d["TotalDiskCapacity"] as? Int, let free = d["TotalDataAvailable"] as? Int {
             storage = DeviceStorage(capacity: cap, free: free,
                                     photos: d["CameraUsage"] as? Int ?? d["PhotoUsage"] as? Int,
-                                    apps: d["MobileApplicationUsage"] as? Int)
+                                    apps: d["MobileApplicationUsage"] as? Int,
+                                    system: d["TotalSystemCapacity"] as? Int)
         }
     }
 

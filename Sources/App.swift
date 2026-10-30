@@ -19,8 +19,9 @@ struct DecantApp: App {
                 .environmentObject(firmware)
                 .environmentObject(apps)
                 .environmentObject(files)
-                .frame(minWidth: 1000, minHeight: 680)
+                .frame(minWidth: 1000, minHeight: 760)
         }
+        .defaultSize(width: 1180, height: 860)
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
 
@@ -33,6 +34,11 @@ struct DecantApp: App {
 }
 
 enum Tab { case device, photos, apps, files, backup, firmware, tools }
+
+/// What the Photos sidebar can select: a kind, a year or a file format. Years and formats come from the library itself.
+enum PhotoFilter: Hashable {
+    case kind(Filter), year(Int), format(String)
+}
 
 enum Filter: String, CaseIterable, Identifiable {
     case all = "All Items", photos = "Photos", videos = "Videos", live = "Live Photos"
@@ -65,7 +71,7 @@ struct RootView: View {
     @AppStorage("thumbSize") private var thumbSize = 132.0
     @State private var tab: Tab = ["photos": Tab.photos, "apps": .apps, "files": .files, "backup": .backup, "firmware": .firmware, "tools": .tools][ProcessInfo.processInfo.environment["DECANT_TAB"] ?? ""] ?? .device   // screenshot aid
     @EnvironmentObject var files: FilesService
-    @State private var filter: Filter? = .all
+    @State private var filter: PhotoFilter? = .kind(.all)
     @State private var confirmDelete = false
     @State private var spaceWarning: String?
     @State private var testStarted = false
@@ -309,6 +315,7 @@ struct Card<Content: View>: View {
 
 struct DeviceDashboard: View {
     @EnvironmentObject var manager: DeviceManager
+    @EnvironmentObject var apps: AppsService
     @State private var revealSerial = false
     let destURL: URL?
     let copy: () -> Void, move: () -> Void, chooseFolder: () -> Void, showLog: () -> Void
@@ -352,9 +359,40 @@ struct DeviceDashboard: View {
                     Button("Log", action: showLog)
                 }
                 .controlSize(.small)
+                Spacer(minLength: 8)
+                batteryBlock
             }
             .frame(maxWidth: .infinity)
         }
+    }
+
+    // Live battery readings (refreshed every 30 s) under the phone.
+    private var batteryBlock: some View {
+        let b = manager.battery
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Battery").font(.system(size: 13, weight: .medium))
+                Spacer()
+                if let c = b?.charging { Text(c ? "Charging" : "On battery").font(.system(size: 12)).foregroundStyle(.secondary) }
+            }
+            .padding(.bottom, 6)
+            smallRow("Level", b?.level.map { "\($0)%" })
+            smallRow("Health", b?.health.map { String(format: "%.0f%%", $0) })
+            smallRow("Cycles", b?.cycleCount.map { $0.formatted() })
+            smallRow("Voltage", b?.voltage.map { String(format: "%.2f V", $0) })
+            smallRow("Capacity", (b?.maxCapacity).flatMap { m in b?.designCapacity.map { "\(m) of \($0) mAh" } })
+        }
+    }
+
+    private func smallRow(_ label: String, _ value: String?) -> some View {
+        HStack {
+            Text(label).foregroundStyle(.secondary)
+            Spacer()
+            Text(value ?? "–").monospacedDigit()
+        }
+        .font(.system(size: 12))
+        .frame(height: 26)
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     private var infoCard: some View {
@@ -369,8 +407,8 @@ struct DeviceDashboard: View {
                     Spacer()
                 }
                 Grid(alignment: .leading, horizontalSpacing: 32, verticalSpacing: 0) {
-                    GridRow { row("Device name", manager.device?.name); row("Battery", batteryText) }
-                    GridRow { row("iOS version", blank(manager.info?.version)); row("Battery health", healthText) }
+                    GridRow { row("Device name", manager.device?.name); row("Wi-Fi address", blank(manager.info?.wifiAddress)) }
+                    GridRow { row("iOS version", blank(manager.info?.version)); row("Bluetooth address", blank(manager.info?.bluetoothAddress)) }
                     GridRow { row("Model", blank(manager.info?.model)); row("Model number", modelNumber) }
                     GridRow { serialRow; row("Region", blank(manager.info?.region)) }
                     GridRow { row("Connection", manager.device == nil ? nil : "USB"); row("Status", manager.device == nil ? nil : manager.statusWord) }
@@ -466,6 +504,9 @@ struct DeviceDashboard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
                 .frame(height: 12)
+                let appBytes = apps.apps.reduce(0) { $0 + $1.totalSize }
+                let system = Double(manager.storage?.system ?? 0)
+                let rest = max(other - Double(appBytes) - system, 0)
                 HStack(spacing: 20) {
                     legend(Color.accentColor, "Photos & videos", manager.device == nil ? nil : (manager.storage?.photos ?? manager.totalBytes))
                     legend(Color(nsColor: .tertiaryLabelColor), "Other", cap > 0 ? Int(other) : nil)
@@ -473,7 +514,43 @@ struct DeviceDashboard: View {
                     Spacer()
                 }
                 .font(.system(size: 12))
+                if cap > 0 {
+                    HStack(alignment: .top, spacing: 32) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("Breakdown").font(.system(size: 13, weight: .medium)).padding(.top, 8).padding(.bottom, 6)
+                            smallRow("Photos & videos", DeviceManager.gb(Int(photos)))
+                            smallRow("Apps and their data", appBytes > 0 ? DeviceManager.gb(appBytes) : (apps.measuring || apps.loading ? "measuring…" : "–"))
+                            smallRow("iOS", system > 0 ? DeviceManager.gb(Int(system)) : "–")
+                            smallRow("Messages, mail, caches", appBytes > 0 ? DeviceManager.gb(Int(rest)) : "–")
+                            smallRow("Free", DeviceManager.gb(Int(free)))
+                        }
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("Largest apps").font(.system(size: 13, weight: .medium)).padding(.top, 8).padding(.bottom, 6)
+                            if appBytes == 0 {
+                                Text(apps.measuring || apps.loading ? "Measuring…" : "Open Apps to measure").font(.system(size: 12)).foregroundStyle(.secondary).frame(height: 26)
+                            }
+                            ForEach(appBytes > 0 ? Array(apps.apps.prefix(5)) : []) { app in
+                                HStack(spacing: 8) {
+                                    if let img = apps.icons[app.bundleID] {
+                                        Image(nsImage: img).resizable().frame(width: 18, height: 18).clipShape(RoundedRectangle(cornerRadius: 4))
+                                    } else {
+                                        RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.15)).frame(width: 18, height: 18)
+                                    }
+                                    Text(app.name).lineLimit(1)
+                                    Spacer()
+                                    Text(DeviceManager.gb(app.totalSize)).monospacedDigit()
+                                }
+                                .font(.system(size: 12))
+                                .frame(height: 26)
+                                .overlay(alignment: .bottom) { Divider() }
+                            }
+                        }
+                    }
+                }
             }
+        }
+        .onChange(of: manager.catalogComplete) { ok in
+            if ok, apps.apps.isEmpty, !apps.loading, let u = Lockdown.cachedUDID { Task { await apps.load(udid: u, includeSystem: false) } }
         }
     }
 
@@ -571,7 +648,7 @@ struct PhoneView: View {
             GeometryReader { g in
                 let side = (g.size.width - 2) / 3
                 LazyVGrid(columns: cols, spacing: 1) {
-                    ForEach(thumbs.prefix(12)) { item in
+                    ForEach(thumbs.prefix(18)) { item in
                         ScreenThumb(item: item).frame(width: side, height: side).clipped()
                     }
                 }
@@ -606,7 +683,7 @@ struct ScreenThumb: View {
 
 struct PhotosPane: View {
     @EnvironmentObject var manager: DeviceManager
-    @Binding var filter: Filter?
+    @Binding var filter: PhotoFilter?
     @Binding var thumbSize: Double
     @Binding var byDate: Bool
     @Binding var skipExisting: Bool
@@ -636,15 +713,53 @@ struct PhotosPane: View {
         }
     }
 
+    static func format(of item: MediaItem) -> String {
+        switch (item.name as NSString).pathExtension.lowercased() {
+        case "heic", "heif": return "HEIC"
+        case "jpg", "jpeg": return "JPEG"
+        case "png": return "PNG"
+        case "gif": return "GIF"
+        case "dng": return "RAW"
+        case "mov": return "MOV"
+        case "mp4", "m4v": return "MP4"
+        case let e where e.isEmpty: return "Other"
+        case let e: return e.uppercased()
+        }
+    }
+
+    private static func year(of item: MediaItem) -> Int? { item.date.map { Calendar.current.component(.year, from: $0) } }
+
+    /// Years newest first, formats by count; both with their counts.
+    private var years: [(Int, Int)] {
+        var c: [Int: Int] = [:]
+        for i in manager.items { if let y = Self.year(of: i) { c[y, default: 0] += 1 } }
+        return c.sorted { $0.key > $1.key }
+    }
+    private var formats: [(String, Int)] {
+        var c: [String: Int] = [:]
+        for i in manager.items { c[Self.format(of: i), default: 0] += 1 }
+        return c.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+    }
+
     private var shown: [MediaItem] {
         let list: [MediaItem]
-        switch filter ?? .all {
-        case .all: list = manager.items
-        case .photos: list = manager.items.filter { !$0.isVideo }
-        case .videos: list = manager.items.filter { $0.isVideo }
-        case .live: list = manager.items.filter { $0.isLivePhoto }
+        switch filter ?? .kind(.all) {
+        case .kind(.all): list = manager.items
+        case .kind(.photos): list = manager.items.filter { !$0.isVideo }
+        case .kind(.videos): list = manager.items.filter { $0.isVideo }
+        case .kind(.live): list = manager.items.filter { $0.isLivePhoto }
+        case .year(let y): list = manager.items.filter { Self.year(of: $0) == y }
+        case .format(let f): list = manager.items.filter { Self.format(of: $0) == f }
         }
         return list.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
+    }
+
+    private func sidebarRow(_ title: String, symbol: String, count: Int) -> some View {
+        HStack {
+            Label(title, systemImage: symbol)
+            Spacer()
+            if manager.device != nil { Text(count, format: .number).foregroundStyle(.secondary).monospacedDigit() }
+        }
     }
 
     var body: some View {
@@ -652,14 +767,21 @@ struct PhotosPane: View {
             List(selection: $filter) {
                 Section("Library") {
                     ForEach(Filter.allCases) { f in
-                        HStack {
-                            Label(f.rawValue, systemImage: f.symbol)
-                            Spacer()
-                            if manager.device != nil {
-                                Text(count(f), format: .number).foregroundStyle(.secondary).monospacedDigit()
-                            }
+                        sidebarRow(f.rawValue, symbol: f.symbol, count: count(f)).tag(PhotoFilter.kind(f))
+                    }
+                }
+                if !years.isEmpty {
+                    Section("Years") {
+                        ForEach(years, id: \.0) { y, n in
+                            sidebarRow(String(y), symbol: "calendar", count: n).tag(PhotoFilter.year(y))
                         }
-                        .tag(f)
+                    }
+                }
+                if formats.count > 1 {
+                    Section("Formats") {
+                        ForEach(formats, id: \.0) { f, n in
+                            sidebarRow(f, symbol: "doc", count: n).tag(PhotoFilter.format(f))
+                        }
                     }
                 }
             }
