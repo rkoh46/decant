@@ -11,6 +11,7 @@ VERSION="${1:?usage: release.sh <version> [publish]}"
 sed -i '' -E "s|(<key>CFBundle(Short)?Version(String)?</key> *<string>)[^<]+|\1$VERSION|g" Info.plist
 export SWIFT_TARGET=arm64-apple-macos15.0
 ./build.sh
+tools/bundle_tools.sh Decant.app
 codesign --force --deep -s - Decant.app
 
 mkdir -p dist
