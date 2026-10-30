@@ -236,6 +236,26 @@ final class DeviceManager: NSObject, ObservableObject {
         Array(items.filter { !$0.isVideo }.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }.prefix(12))
     }
 
+    // MARK: Preview
+
+    private var previewCache: [String: URL] = [:]
+    private static let previewDir: URL = {
+        let d = FileManager.default.temporaryDirectory.appendingPathComponent("Decant/preview", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }()
+
+    /// The item at full size, downloaded from the phone the first time it is viewed.
+    func previewURL(for item: MediaItem) async -> URL? {
+        if let u = previewCache[item.id], FileManager.default.fileExists(atPath: u.path) { return u }
+        let url = Self.previewDir.appendingPathComponent(item.name)
+        if case .success = await download(item.file, to: Self.previewDir, sidecars: false), FileManager.default.fileExists(atPath: url.path) {
+            previewCache[item.id] = url
+            return url
+        }
+        return nil
+    }
+
     // MARK: Totals
 
     var photoCount: Int { items.filter { !$0.isVideo }.count }
@@ -247,14 +267,15 @@ final class DeviceManager: NSObject, ObservableObject {
     func addLog(_ line: String) {
         let t = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         log.append("\(t)  \(line)")
+        NSLog("%@", line)                       // mirrored to the system log for diagnosis
         if log.count > 2000 { log.removeFirst(log.count - 2000) }
     }
 
     // MARK: Offload
 
-    func offload(_ opts: OffloadOptions) {
+    func offload(_ opts: OffloadOptions, only: [MediaItem]? = nil) {
         guard let camera = device, !running else { return }
-        let targets = items.filter { selection.contains($0.id) }
+        let targets = only ?? items.filter { selection.contains($0.id) }
         guard !targets.isEmpty else { return }
         running = true; cancelled = false; summary = nil
         progress = OffloadProgress(done: 0, total: targets.count, bytesDone: 0,
@@ -306,9 +327,9 @@ final class DeviceManager: NSObject, ObservableObject {
         }
     }
 
-    private func download(_ file: ICCameraFile, to dir: URL) async -> Result<Void, Error> {
+    private func download(_ file: ICCameraFile, to dir: URL, sidecars: Bool = true) async -> Result<Void, Error> {
         await withCheckedContinuation { cont in
-            file.requestDownload(options: [.downloadsDirectoryURL: dir, .overwrite: true, .sidecarFiles: true]) { _, error in
+            file.requestDownload(options: [.downloadsDirectoryURL: dir, .overwrite: true, .sidecarFiles: sidecars]) { _, error in
                 DispatchQueue.main.async {
                     if let error { cont.resume(returning: .failure(error)) } else { cont.resume(returning: .success(())) }
                 }
@@ -322,6 +343,21 @@ final class DeviceManager: NSObject, ObservableObject {
         let toDelete = targets.filter { $0.status.isCopied }
         guard !toDelete.isEmpty else { return 0 }
         addLog("Deleting \(toDelete.count) verified items from the iPhone…")
+        return await deleteFromPhone(camera, toDelete)
+    }
+
+    /// Delete items on the phone outright (context menu). Nothing is copied first; the caller has confirmed.
+    func deleteFromPhone(_ items: [MediaItem]) {
+        guard let camera = device, !running else { return }
+        running = true
+        Task { @MainActor in
+            let n = await deleteFromPhone(camera, items)
+            summary = "\(n) of \(items.count) deleted from the iPhone"
+            running = false
+        }
+    }
+
+    private func deleteFromPhone(_ camera: ICCameraDevice, _ toDelete: [MediaItem]) async -> Int {
         var deleted = 0
         for start in stride(from: 0, to: toDelete.count, by: 50) {
             let chunk = Array(toDelete[start..<min(start + 50, toDelete.count)])

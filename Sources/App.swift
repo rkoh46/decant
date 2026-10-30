@@ -1,5 +1,6 @@
 import SwiftUI
 import ImageCaptureCore
+import AVKit
 
 @main
 struct DecantApp: App {
@@ -603,6 +604,8 @@ struct PhotosPane: View {
     @Binding var deleteAfterCopy: Bool
     let destURL: URL?
     let chooseFolder: () -> Void, showLog: () -> Void, start: () -> Void
+    @State private var viewing: MediaItem? = nil
+    @State private var deleting: MediaItem? = nil
 
     private func count(_ f: Filter) -> Int {
         switch f {
@@ -691,10 +694,20 @@ struct PhotosPane: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: thumbSize, maximum: thumbSize), spacing: 4)], spacing: 4) {
                         ForEach(shown) { item in
                             ThumbCell(item: item, size: thumbSize, selected: manager.selection.contains(item.id))
-                                .onTapGesture {
-                                    guard !manager.running else { return }
-                                    if manager.selection.contains(item.id) { manager.selection.remove(item.id) }
-                                    else { manager.selection.insert(item.id) }
+                                .onTapGesture(count: 2) { viewing = item }
+                                .onTapGesture { toggle(item) }
+                                .contextMenu {
+                                    Button("View") { viewing = item }
+                                    Button(manager.selection.contains(item.id) ? "Deselect" : "Select") { toggle(item) }
+                                    Divider()
+                                    Button("Copy This Item to Mac") {
+                                        guard let url = destURL else { chooseFolder(); return }
+                                        manager.offload(OffloadOptions(destination: url, byDate: byDate, skipExisting: skipExisting, deleteAfterCopy: false), only: [item])
+                                    }
+                                    .disabled(manager.running)
+                                    Divider()
+                                    Button("Delete from iPhone…", role: .destructive) { deleting = item }
+                                        .disabled(manager.running || item.status == .deleted)
                                 }
                         }
                     }
@@ -703,6 +716,24 @@ struct PhotosPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .sheet(item: $viewing) { item in
+            PreviewSheet(items: shown, current: item) { viewing = nil }
+                .environmentObject(manager)
+        }
+        .alert("Delete \(deleting?.name ?? "this item") from the iPhone?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+            Button("Delete", role: .destructive) { if let d = deleting { manager.deleteFromPhone([d]) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("It is not copied to the Mac first. The iPhone may keep it in Recently Deleted for 30 days.")
+        }
+        .onAppear {
+            if ProcessInfo.processInfo.environment["DECANT_PREVIEW"] == "1", let first = shown.first { viewing = first }   // screenshot aid
+        }
+    }
+
+    private func toggle(_ item: MediaItem) {
+        guard !manager.running else { return }
+        if manager.selection.contains(item.id) { manager.selection.remove(item.id) } else { manager.selection.insert(item.id) }
     }
 
     private var bottomBar: some View {
@@ -751,6 +782,106 @@ struct PhotosPane: View {
     private var progressText: String {
         let p = manager.progress
         return "\(p.phase) \(p.done.formatted()) of \(p.total.formatted()) · \(DeviceManager.gb(p.bytesDone)) of \(DeviceManager.gb(p.bytesTotal))"
+    }
+}
+
+// MARK: - Viewer: the item at full size, fetched from the phone on demand
+
+struct PreviewSheet: View {
+    @EnvironmentObject var manager: DeviceManager
+    let items: [MediaItem]
+    @State var current: MediaItem
+    let close: () -> Void
+    @State private var url: URL?
+    @State private var failed = false
+    @State private var player: AVPlayer?
+
+    private var index: Int { items.firstIndex(of: current) ?? 0 }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                Color.black
+                if let url {
+                    if current.isVideo {
+                        VideoPlayer(player: player).onAppear { player = AVPlayer(url: url); player?.play() }
+                    } else if let img = NSImage(contentsOf: url) {
+                        Image(nsImage: img).resizable().aspectRatio(contentMode: .fit)
+                    } else {
+                        unavailable
+                    }
+                } else if failed {
+                    unavailable
+                } else {
+                    VStack(spacing: 12) {
+                        if let t = current.thumbnail {
+                            Image(decorative: t, scale: 1).resizable().aspectRatio(contentMode: .fit).blur(radius: 6).opacity(0.5)
+                        }
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                HStack {
+                    arrow("chevron.left", enabled: index > 0) { step(-1) }
+                    Spacer()
+                    arrow("chevron.right", enabled: index < items.count - 1) { step(1) }
+                }
+                .padding(12)
+            }
+            .frame(minWidth: 960, minHeight: 600)
+            Divider()
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(current.name).font(.system(size: 13, weight: .medium))
+                    Text(detail).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
+                }
+                Spacer()
+                Text("\(index + 1) of \(items.count)").font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
+                Button("Done", action: close).keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 52)
+            .background(.bar)
+        }
+        .task(id: current.id) { await load() }
+        .onKeyPress(.leftArrow) { step(-1); return .handled }
+        .onKeyPress(.rightArrow) { step(1); return .handled }
+        .onKeyPress(.space) { if current.isVideo, let p = player { p.rate == 0 ? p.play() : p.pause() }; return .handled }
+    }
+
+    private var detail: String {
+        var parts = [DeviceManager.gb(current.size)]
+        if let d = current.date { parts.append(d.formatted(date: .long, time: .shortened)) }
+        if current.isVideo { parts.append(ThumbCell.clock(current.duration)) }
+        if current.isLivePhoto { parts.append("Live Photo") }
+        return parts.joined(separator: " · ")
+    }
+
+    private var unavailable: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "photo.badge.exclamationmark").font(.system(size: 36, weight: .light)).foregroundStyle(.secondary)
+            Text("Could not load this item from the iPhone").foregroundStyle(.secondary)
+        }
+    }
+
+    private func arrow(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 18, weight: .medium)).frame(width: 40, height: 40)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .buttonStyle(.plain).opacity(enabled ? 1 : 0).disabled(!enabled)
+    }
+
+    private func step(_ by: Int) {
+        let i = index + by
+        guard items.indices.contains(i) else { return }
+        player?.pause(); player = nil
+        url = nil; failed = false
+        current = items[i]
+    }
+
+    private func load() async {
+        url = nil; failed = false
+        if let u = await manager.previewURL(for: current) { url = u } else { failed = true }
     }
 }
 
