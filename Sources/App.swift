@@ -267,6 +267,7 @@ struct TabButton: View {
             .frame(width: 80, height: 44)
             .foregroundStyle(selected ? .primary : .secondary)
             .background(selected ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 8))       // the whole tile is the click target
         }
         .buttonStyle(.plain)
     }

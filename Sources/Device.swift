@@ -158,6 +158,8 @@ final class DeviceManager: NSObject, ObservableObject {
     @Published var canDelete = true           // false when the phone withholds delete (iCloud Photos on)
     @Published var connectAttempts = 0        // watchdog retries of a session open that never completed
     private var removedByPhone = Set<ObjectIdentifier>()
+    /// Items deleted through iCloud that the phone still lists until it syncs: kept out of re-reads meanwhile.
+    private var pendingICloudDeletes: [String: Date] = [:]
     @Published var running = false
     @Published var progress = OffloadProgress()
     @Published var summary: String?
@@ -413,7 +415,7 @@ final class DeviceManager: NSObject, ObservableObject {
         progress.phase = "Matching in Photos library"
         do {
             let (deleted, missing) = try await PhotoLibraryDeleter.delete(items)
-            for i in deleted { i.status = .deleted }
+            for i in deleted { i.status = .deleted; pendingICloudDeletes[i.id] = Date() }
             removeFromList(deleted)
             for i in missing { i.status = .failed("not found in the Mac's Photos library") }
             if !missing.isEmpty { addLog("\(missing.count) items were not in the Mac's Photos library yet (iCloud still syncing?)") }
@@ -729,6 +731,10 @@ extension DeviceManager: ICCameraDeviceDelegate {
             let key = ObjectIdentifier(file)
             guard byFile[key] == nil else { continue }
             let item = MediaItem(file)
+            if let when = pendingICloudDeletes[item.id] {
+                if Date().timeIntervalSince(when) < 1800 { continue }   // still syncing out; do not show it again
+                pendingICloudDeletes[item.id] = nil
+            }
             byFile[key] = item
             pendingAdds.append(item)
         }
@@ -741,6 +747,7 @@ extension DeviceManager: ICCameraDeviceDelegate {
     func cameraDevice(_ camera: ICCameraDevice, didRemove items: [ICCameraItem]) {
         let gone = Set(items.map { ObjectIdentifier($0) })
         removedByPhone.formUnion(gone)
+        for case let f as ICCameraFile in items { pendingICloudDeletes[MediaItem(f).id] = nil }   // the phone caught up
         for k in gone { byFile[k]?.status = .deleted }
         self.selection.subtract(self.items.filter { gone.contains(ObjectIdentifier($0.file)) }.map { $0.id })
         self.items.removeAll { gone.contains(ObjectIdentifier($0.file)) }
