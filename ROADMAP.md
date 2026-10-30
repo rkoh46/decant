@@ -28,6 +28,12 @@ confirmation in the UI.
    from the bundle.
 3. **Firmware** tab: done in the UI; needs `tsschecker`, `idevicerestore`, `irecovery` and `futurerestore`
    present (vendored or bundled) to light up. Still to verify end to end on a spare device.
+   - **tsschecker must be a 2026 build.** Release 444 (Oct 2025) builds iOS 27 requests without the new
+     `Yonkers,SysTopPatch*` and `eUICC` components, and Apple's TSS answers `STATUS=168 An internal error
+     occurred`, which tsschecker reports as "not signed". Use the CI build from `gh run download -R
+     1Conan/tsschecker <run>` (macOS RELEASE artifact). Also required for A12+ devices: `--bbsnum` (baseband
+     serial from lockdown, base64 → hex) and, with a generator, the matching ApNonce (SHA-384 of the generator
+     bytes, first 32 bytes).
    - **SHSH blobs**: saved automatically each time the phone connects, for every version Apple is signing, with
      the generator `0x1111111111111111` (so a future restore can set a matching nonce) and the device's current
      APNonce when available. Stored per ECID under `OS_Backups/Decant/Blobs/<ECID>/`. List saved blobs, verify
