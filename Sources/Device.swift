@@ -315,8 +315,8 @@ final class DeviceManager: NSObject, ObservableObject {
             addLog("Copy finished: \(copied) copied, \(skipped) already there, \(failed) failed")
             var deleted = 0
             if opts.deleteAfterCopy && !cancelled && copied + skipped > 0 {
-                progress.phase = canDelete ? "Deleting from iPhone" : "Deleting via iCloud"
-                deleted = canDelete ? await deleteCopied(camera, targets) : await deleteViaICloud(targets.filter { $0.status.isCopied })
+                progress.phase = "Deleting"
+                deleted = await deleteAnyWay(camera, targets.filter { $0.status.isCopied })
             }
             progress.phase = "Done"
             var parts = ["\(copied + skipped) of \(targets.count) items on the Mac"]
@@ -353,10 +353,24 @@ final class DeviceManager: NSObject, ObservableObject {
         guard let camera = device, !running else { return }
         running = true
         Task { @MainActor in
-            let n = canDelete ? await deleteFromPhone(camera, items) : await deleteViaICloud(items)
-            summary = "\(n) of \(items.count) deleted" + (canDelete ? " from the iPhone" : " via iCloud")
+            let n = await deleteAnyWay(camera, items)
+            summary = "\(n) of \(items.count) deleted"
             running = false
         }
+    }
+
+    /// USB first (instant, no dialog) when the phone claims to allow it; whatever it does not confirm goes
+    /// through iCloud. With iCloud Photos on, iOS advertises the capability and then silently ignores the delete.
+    private func deleteAnyWay(_ camera: ICCameraDevice, _ items: [MediaItem]) async -> Int {
+        var done = 0
+        var remaining = items
+        if canDelete {
+            done = await deleteFromPhone(camera, items)
+            remaining = items.filter { $0.status != .deleted }
+            if !remaining.isEmpty { addLog("\(remaining.count) items were not removed over USB; deleting them through iCloud instead") }
+        }
+        if !remaining.isEmpty { done += await deleteViaICloud(remaining) }
+        return done
     }
 
     /// iCloud route: delete the same assets from the Mac's Photos library; iCloud removes them from the phone.

@@ -179,11 +179,36 @@ struct RootView: View {
     // report on stdout and quit. Used to prove a clean copy-verify-delete before a bulk run.
     private func runTestModeIfRequested() {
         let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--match-test"), args.count > i + 1, let n = Int(args[i + 1]), !testStarted {
+            testStarted = true
+            let report = Self.reporter(FileManager.default.temporaryDirectory.appendingPathComponent("decant-match.log"))
+            Task { @MainActor in
+                let newest = Array(manager.items.filter { !$0.isVideo }.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }.prefix(n))
+                if !PhotoLibraryDeleter.authorized { _ = await PhotoLibraryDeleter.requestAccess() }
+                let (found, missing) = PhotoLibraryDeleter.match(newest)
+                for item in newest {
+                    if let a = found[item] { report("MATCH \(item.name) → library asset \(a.localIdentifier.prefix(8))… \(a.creationDate?.formatted() ?? "no date")") }
+                    else { report("MISSING \(item.name) (phone date \(item.date?.formatted() ?? "none"))") }
+                }
+                report("MATCH RESULT: \(found.count) of \(newest.count) found, \(missing.count) missing")
+                NSApp.terminate(nil)
+            }
+            return
+        }
+        if let i = args.firstIndex(of: "--list-newest"), args.count > i + 1, let n = Int(args[i + 1]), !testStarted {
+            testStarted = true
+            let newest = manager.items.filter { !$0.isVideo }.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }.prefix(n)
+            let report = Self.reporter(FileManager.default.temporaryDirectory.appendingPathComponent("decant-newest.log"))
+            report("NEWEST (\(manager.items.count) items on phone): " + newest.map { $0.name }.joined(separator: ", "))
+            NSApp.terminate(nil); return
+        }
         guard !testStarted, let i = args.firstIndex(of: "--test-offload"), args.count > i + 2,
               let n = Int(args[i + 1]) else { return }
         testStarted = true
         let dest = URL(fileURLWithPath: args[i + 2])
+        let report = Self.reporter(dest.appendingPathComponent(".decant-test.log"))
         Task { @MainActor in
+            let print = report
             let picks = manager.items.filter { !$0.isVideo }
                 .sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }.prefix(n)
             let names = picks.map { $0.name }
@@ -195,14 +220,32 @@ struct RootView: View {
                 let folder = DeviceManager.dateFolder(dest, p.date).appendingPathComponent(p.name).path
                 print("TEST \(p.name): status=\(p.status) phoneSize=\(p.size) diskSize=\(DeviceManager.size(of: URL(fileURLWithPath: folder)) ?? -1) at \(folder)")
             }
-            print("TEST re-reading the iPhone…")
-            let before = manager.items.count
-            manager.refresh()
-            while !manager.catalogComplete { try? await Task.sleep(nanoseconds: 200_000_000) }
-            let still = manager.items.filter { names.contains($0.name) }.map { $0.name }
-            print("TEST items on phone: \(before) -> \(manager.items.count); still present: \(still.isEmpty ? "none" : still.joined(separator: ", "))")
-            print(still.isEmpty && picks.allSatisfy { $0.status == .deleted } ? "TEST RESULT: PASS" : "TEST RESULT: FAIL")
+            let allDeleted = picks.allSatisfy { $0.status == .deleted }
+            if manager.canDelete {
+                print("TEST re-reading the iPhone…")
+                let before = manager.items.count
+                manager.refresh()
+                while !manager.catalogComplete { try? await Task.sleep(nanoseconds: 200_000_000) }
+                let still = manager.items.filter { names.contains($0.name) }.map { $0.name }
+                print("TEST items on phone: \(before) -> \(manager.items.count); still present: \(still.isEmpty ? "none" : still.joined(separator: ", "))")
+                print(still.isEmpty && allDeleted ? "TEST RESULT: PASS" : "TEST RESULT: FAIL")
+            } else {
+                print("TEST iCloud Photos is on: deleted through the Mac's Photos library; the iPhone drops them on its next sync (check with --list-newest)")
+                print(allDeleted ? "TEST RESULT: PASS" : "TEST RESULT: FAIL")
+            }
             NSApp.terminate(nil)
+        }
+    }
+}
+
+extension RootView {
+    /// Test output goes to stdout and to a file, because `open` (needed so macOS can show permission prompts)
+    /// does not pass stdout back.
+    static func reporter(_ url: URL) -> (String) -> Void {
+        try? "".write(to: url, atomically: true, encoding: .utf8)
+        return { line in
+            Swift.print(line)
+            if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(Data((line + "\n").utf8)); try? h.close() }
         }
     }
 }

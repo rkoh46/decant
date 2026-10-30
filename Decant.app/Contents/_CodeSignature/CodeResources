@@ -8,232 +8,23 @@
 		<data>
 		Slzjeb26J4DclHkxardgFb3LI4I=
 		</data>
-		<key>Resources/THIRD-PARTY-NOTICES.md</key>
-		<data>
-		9Q3ayAicmzHaeum7kbvMAO+D8ss=
-		</data>
 	</dict>
 	<key>files2</key>
 	<dict>
-		<key>Helpers/afcclient</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			KdAaP7vHGEywECGTZG4IikYi9G0=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"29d01a3fbbc7184cb0102193646e088a4622f46d"</string>
-		</dict>
 		<key>Helpers/decant-tss</key>
 		<dict>
 			<key>cdhash</key>
 			<data>
-			dg1k7w/LyJlYUuMwW/KXNxkNbJA=
+			OGuKqNVIgZWlGPgLicUZUUIykag=
 			</data>
 			<key>requirement</key>
-			<string>cdhash H"760d64ef0fcbc8995852e3305bf29737190d6c90"</string>
-		</dict>
-		<key>Helpers/futurerestore</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			gXKskjashHq+dd9YopU6HFY11Lg=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"8172ac9236ac847abe75df58a2953a1c5635d4b8" or cdhash H"8f0d8d6d4a1b0d7914af2de981d6e809625e8563"</string>
-		</dict>
-		<key>Helpers/idevice_id</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			VlJCx2Wf806kW+247vtpH9yLWzU=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"565242c7659ff34ea45bedb8eefb691fdc8b5b35"</string>
-		</dict>
-		<key>Helpers/idevicebackup2</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			NJm1c76+yoZRSqLTqsyY6JkVIXg=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"3499b573bebeca86514aa2d3aacc98e899152178"</string>
-		</dict>
-		<key>Helpers/idevicecrashreport</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			zJfwdoGY9OFHOABZF7nCET8IiEk=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"cc97f0768198f4e14738005917b9c2113f088849"</string>
-		</dict>
-		<key>Helpers/idevicediagnostics</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			8Rpw9+mb5Vsr/blfeF+Yjn74g1A=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"f11a70f7e99be55b2bfdb95f785f988e7ef88350"</string>
-		</dict>
-		<key>Helpers/ideviceenterrecovery</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			6igEXVQgoGEqj4Y2hGDmX6jIOUs=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"ea28045d5420a0612a8f86368460e65fa8c8394b"</string>
-		</dict>
-		<key>Helpers/ideviceinfo</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			ni70kuFmssVDYPrFPyYM8M1GJhM=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"9e2ef492e166b2c54360fac53f260cf0cd462613"</string>
-		</dict>
-		<key>Helpers/idevicename</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			F7lFyaF1VwPV8703lnlztSVRC/A=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"17b945c9a1755703d5f3bd37967973b525510bf0"</string>
-		</dict>
-		<key>Helpers/idevicerestore</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			xlEpC7QNFP3arCB54GgwMTjTgXs=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"c651290bb40d14fddaac2079e068303138d3817b"</string>
-		</dict>
-		<key>Helpers/irecovery</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			Gy7oDkwznBm0lDstnjIKIST6Xto=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"1b2ee80e4c339c19b4943b2d9e320a2124fa5eda"</string>
-		</dict>
-		<key>Helpers/libcrypto.4.dylib</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			aE05UgMIqPE+hIXdL8fZc0zfGqE=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"684d39520308a8f13e8485dd2fc7d9734cdf1aa1"</string>
-		</dict>
-		<key>Helpers/libimobiledevice-1.0.6.dylib</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			B0/YXPWXG3t9rklqi/8PQUo0tHk=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"074fd85cf5971b7b7dae496a8bff0f414a34b479"</string>
-		</dict>
-		<key>Helpers/libimobiledevice-glue-1.0.0.dylib</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			AQayt1PsOznBapUzNDsU21k67KQ=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"0106b2b753ec3b39c16a9533343b14db593aeca4"</string>
-		</dict>
-		<key>Helpers/libirecovery-1.0.5.dylib</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			Cl0JDcvkyeP8un41ctINuGZpxVE=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"0a5d090dcbe4c9e3fcba7e3572d20db86669c551"</string>
-		</dict>
-		<key>Helpers/liblzma.5.dylib</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			Cecf5hEsuoeZJ/btSuqEa18XImk=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"09e71fe6112cba879927f6ed4aea846b5f172269"</string>
-		</dict>
-		<key>Helpers/libplist-2.0.12.dylib</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			DqvBR4KcMxGxhpn76rJnZMsSNuM=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"0eabc147829c3311b18699fbeab26764cb1236e3"</string>
-		</dict>
-		<key>Helpers/libssl.4.dylib</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			lKeGqw0Do+yTr7YFtMnqsmcaU2E=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"94a786ab0d03a3ec93afb605b4c9eab2671a5361"</string>
-		</dict>
-		<key>Helpers/libtatsu.0.dylib</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			rVvVQsceYLUEERSQp4hz5OBQoc8=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"ad5bd542c71e60b504111490a78873e4e050a1cf"</string>
-		</dict>
-		<key>Helpers/libusbmuxd-2.0.7.dylib</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			lIYc53vGJy4gSuDtZ9u6PfhZttY=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"94861ce77bc6272e204ae0ed67dbba3df859b6d6"</string>
-		</dict>
-		<key>Helpers/libzip.5.dylib</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			pmNHunF235PRll1ukxuSqD74r/s=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"a66347ba7176df93d1965d6e931b92a83ef8affb"</string>
-		</dict>
-		<key>Helpers/libzstd.1.dylib</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			jyMHMJOnaIrZHNInAWKxIDiMOyA=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"8f23073093a7688ad91cd2270162b120388c3b20"</string>
+			<string>cdhash H"386b8aa8d5488195a518f80b89c51951423291a8"</string>
 		</dict>
 		<key>Resources/Decant.icns</key>
 		<dict>
 			<key>hash2</key>
 			<data>
 			j6bMRwzGa50G8YmJCXrI/EEzLIlC6syiyzvkVd2qtWE=
-			</data>
-		</dict>
-		<key>Resources/THIRD-PARTY-NOTICES.md</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			RMzcUCv8/WfOyQLlQwBl00zRcnqYdGeDGnNdMZkXiUA=
 			</data>
 		</dict>
 	</dict>
