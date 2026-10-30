@@ -269,7 +269,10 @@ struct FirmwarePane: View {
     @EnvironmentObject var firmware: FirmwareService
     @AppStorage("firmwareRoot") private var firmwareRoot = FirmwareService.defaultRoot.path
     @AppStorage("autoSaveBlobs") private var autoSaveBlobs = true
-    @AppStorage("blobGenerator") private var generator = FirmwareService.generator
+    private let generator = FirmwareService.generator                  // the convention; not user-editable
+    @AppStorage("extraGenerator") private var extraGenerator = ""       // advanced: a second generator, saved in addition
+    @State private var editingExtra = false
+    @State private var extraDraft = ""
     @State private var restoreTarget: (fw: Firmware, erase: Bool, future: Bool)?
     @State private var confirmStep = 0
     @State private var revealECID = false
@@ -310,14 +313,23 @@ struct FirmwarePane: View {
         } message: { Text("Keep the cable connected until the iPhone finishes and shows the Hello screen or your lock screen.") }
     }
 
+    /// The default generator always; a custom one only in addition, never instead.
+    private func saveAll() async {
+        let bb = (manager.info?.basebandSerial ?? "", manager.info?.basebandCert ?? "")
+        await firmware.saveBlobs(ecid: ecid, productType: model, board: board, basebandSerial: bb.0, basebandCert: bb.1, root: root, generator: generator)
+        if FirmwareService.validGenerator(extraGenerator) && extraGenerator != generator {
+            await firmware.saveBlobs(ecid: ecid, productType: model, board: board, basebandSerial: bb.0, basebandCert: bb.1, root: root, generator: extraGenerator)
+        }
+    }
+
     private func refresh() {
         guard !model.isEmpty else { return }
         Task {
             await firmware.loadSigning(productType: model)
             firmware.scanBlobs(root: root, ecid: ecid)
             await firmware.refreshMode()
-            if autoSaveBlobs && !ecid.isEmpty && !board.isEmpty && Tools.has("decant-tss") && FirmwareService.validGenerator(generator) {
-                await firmware.saveBlobs(ecid: ecid, productType: model, board: board, basebandSerial: manager.info?.basebandSerial ?? "", basebandCert: manager.info?.basebandCert ?? "", root: root, generator: generator)
+            if autoSaveBlobs && !ecid.isEmpty && !board.isEmpty && Tools.has("decant-tss") {
+                await saveAll()
             }
         }
     }
@@ -354,15 +366,23 @@ struct FirmwarePane: View {
                 .font(.system(size: 13))
                 HStack(spacing: 8) {
                     Text("Generator").foregroundStyle(.secondary).frame(width: 112, alignment: .leading)
-                    TextField("0x1111111111111111", text: $generator).textFieldStyle(.roundedBorder).monospaced().frame(width: 190)
-                    if !FirmwareService.validGenerator(generator) {
-                        Text("Needs 0x and 16 hex digits").foregroundStyle(Tone.warning)
-                    } else if generator != FirmwareService.generator {
-                        Button("Use the default") { generator = FirmwareService.generator }.buttonStyle(.link)
-                    } else {
-                        Text("The convention every guide and tool uses; a blob only works if the phone is set to the same value").foregroundStyle(.secondary)
-                    }
+                    Text(generator).monospaced()
+                    Text("The convention every guide and tool uses").foregroundStyle(.secondary)
                     Spacer()
+                    if extraGenerator.isEmpty {
+                        Button("Also save for a custom generator…") { extraDraft = ""; editingExtra = true }.buttonStyle(.link)
+                    } else {
+                        Text("also \(extraGenerator)").monospaced().foregroundStyle(.secondary)
+                        Button("Remove") { extraGenerator = "" }.buttonStyle(.link)
+                    }
+                }
+                .alert("Save blobs for a second generator", isPresented: $editingExtra) {
+                    TextField("0x…", text: $extraDraft)
+                    Button("Add") { extraGenerator = extraDraft.trimmingCharacters(in: .whitespaces) }
+                        .disabled(!FirmwareService.validGenerator(extraDraft.trimmingCharacters(in: .whitespaces)))
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Only for a jailbroken phone that already boots with a fixed custom generator. Blobs for the default generator are still saved; a blob for a generator the phone cannot be set to is useless.")
                 }
                 .font(.system(size: 13))
                 if firmware.running {
@@ -394,8 +414,8 @@ struct FirmwarePane: View {
             HStack {
                 Text("SHSH blobs").font(.system(size: 13)).foregroundStyle(.secondary)
                 Spacer()
-                Button("Save Blobs Now") { Task { await firmware.saveBlobs(ecid: ecid, productType: model, board: board, basebandSerial: manager.info?.basebandSerial ?? "", basebandCert: manager.info?.basebandCert ?? "", root: root, generator: generator) } }
-                    .controlSize(.small).disabled(!connected || firmware.running || !Tools.has("decant-tss") || !FirmwareService.validGenerator(generator))
+                Button("Save Blobs Now") { Task { await saveAll() } }
+                    .controlSize(.small).disabled(!connected || firmware.running || !Tools.has("decant-tss"))
                 Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([FirmwareService.blobDir(root, ecid: ecid)]) }
                     .controlSize(.small).disabled(!connected)
             }
