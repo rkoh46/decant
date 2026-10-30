@@ -674,6 +674,11 @@ struct PhotosPane: View {
     @State private var marquee: CGRect? = nil
     @State private var marqueeBase: Set<String> = []
     @State private var lastClicked: String? = nil
+    @State private var gridOrigin: CGPoint = .zero          // grid's top-left in viewport coordinates (scroll offset)
+    @State private var viewportSize: CGSize = .zero
+    @State private var dragStartContent: CGPoint? = nil      // where the marquee began, in grid (content) coordinates
+    @State private var pointerInViewport: CGPoint = .zero
+    @StateObject private var autoscroll = AutoScroller()
 
     private func count(_ f: Filter) -> Int {
         switch f {
@@ -766,54 +771,71 @@ struct PhotosPane: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: thumbSize, maximum: thumbSize), spacing: 4)], spacing: 4) {
-                        ForEach(shown) { item in
-                            ThumbCell(item: item, size: thumbSize, selected: manager.selection.contains(item.id))
-                                .background(GeometryReader { g in
-                                    Color.clear.preference(key: CellFramesKey.self, value: [item.id: g.frame(in: .named("grid"))])
-                                })
-                                .onTapGesture(count: 2) { viewing = item }
-                                .onTapGesture { click(item) }
-                                .contextMenu {
-                                    Button("View") { viewing = item }
-                                    Button(manager.selection.contains(item.id) ? "Deselect" : "Select") { toggle(item) }
-                                    Divider()
-                                    Button("Copy This Item to Mac") {
-                                        guard let url = destURL else { chooseFolder(); return }
-                                        manager.offload(OffloadOptions(destination: url, byDate: byDate, skipExisting: skipExisting, deleteAfterCopy: false), only: [item])
-                                    }
-                                    .disabled(manager.running)
-                                    Divider()
-                                    Button(manager.canDelete ? "Delete from iPhone…" : "Delete via iCloud…", role: .destructive) { deleting = item }
-                                        .disabled(manager.running || item.status == .deleted)
+                GeometryReader { outer in
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: thumbSize, maximum: thumbSize), spacing: 4)], spacing: 4) {
+                                ForEach(shown) { item in
+                                    ThumbCell(item: item, size: thumbSize, selected: manager.selection.contains(item.id))
+                                        .background(GeometryReader { g in
+                                            Color.clear.preference(key: CellFramesKey.self, value: [item.id: g.frame(in: .named("grid"))])
+                                        })
+                                        .id(item.id)
+                                        .onTapGesture(count: 2) { viewing = item }
+                                        .onTapGesture { click(item) }
+                                        .contextMenu {
+                                            Button("View") { viewing = item }
+                                            Button(manager.selection.contains(item.id) ? "Deselect" : "Select") { toggle(item) }
+                                            Divider()
+                                            Button("Copy This Item to Mac") {
+                                                guard let url = destURL else { chooseFolder(); return }
+                                                manager.offload(OffloadOptions(destination: url, byDate: byDate, skipExisting: skipExisting, deleteAfterCopy: false), only: [item])
+                                            }
+                                            .disabled(manager.running)
+                                            Divider()
+                                            Button(manager.canDelete ? "Delete from iPhone…" : "Delete via iCloud…", role: .destructive) { deleting = item }
+                                                .disabled(manager.running || item.status == .deleted)
+                                        }
                                 }
+                            }
+                            .padding(8)
+                            .coordinateSpace(name: "grid")
+                            .background(GeometryReader { g in
+                                Color.clear.preference(key: GridOriginKey.self, value: g.frame(in: .named("viewport")).origin)
+                            })
+                            .onPreferenceChange(CellFramesKey.self) { cellFrames.merge($0) { _, new in new } }
+                            .onPreferenceChange(GridOriginKey.self) { gridOrigin = $0 }
+                            .overlay {
+                                if let m = marquee {
+                                    Rectangle().fill(Color.accentColor.opacity(0.12))
+                                        .overlay(Rectangle().strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1))
+                                        .frame(width: m.width, height: m.height)
+                                        .position(x: m.midX, y: m.midY)
+                                        .allowsHitTesting(false)
+                                }
+                            }
                         }
+                        .coordinateSpace(name: "viewport")
+                        // Drag across the grid to select everything the rectangle touches (shift adds to the selection).
+                        // Near the top or bottom edge the grid scrolls by itself and the rectangle keeps growing.
+                        .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .named("viewport"))
+                            .onChanged { v in
+                                guard !manager.running else { return }
+                                if dragStartContent == nil {
+                                    marqueeBase = NSEvent.modifierFlags.contains(.shift) ? manager.selection : []
+                                    dragStartContent = CGPoint(x: v.startLocation.x - gridOrigin.x, y: v.startLocation.y - gridOrigin.y)
+                                }
+                                pointerInViewport = v.location
+                                updateMarquee()
+                                let edge: CGFloat = 40
+                                if v.location.y > viewportSize.height - edge { autoscroll.start(direction: 1) { autoscrollStep(proxy, 1) } }
+                                else if v.location.y < edge { autoscroll.start(direction: -1) { autoscrollStep(proxy, -1) } }
+                                else { autoscroll.stop() }
+                            }
+                            .onEnded { _ in autoscroll.stop(); marquee = nil; dragStartContent = nil })
+                        .onChange(of: outer.size) { viewportSize = $0 }
+                        .onAppear { viewportSize = outer.size }
                     }
-                    .padding(8)
-                    .coordinateSpace(name: "grid")
-                    .onPreferenceChange(CellFramesKey.self) { cellFrames.merge($0) { _, new in new } }
-                    .overlay {
-                        if let m = marquee {
-                            Rectangle().fill(Color.accentColor.opacity(0.12))
-                                .overlay(Rectangle().strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1))
-                                .frame(width: m.width, height: m.height)
-                                .position(x: m.midX, y: m.midY)
-                                .allowsHitTesting(false)
-                        }
-                    }
-                    // Drag across the grid to select everything the rectangle touches (shift adds to the selection).
-                    .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .named("grid"))
-                        .onChanged { v in
-                            guard !manager.running else { return }
-                            if marquee == nil { marqueeBase = NSEvent.modifierFlags.contains(.shift) ? manager.selection : [] }
-                            let r = CGRect(x: min(v.startLocation.x, v.location.x), y: min(v.startLocation.y, v.location.y),
-                                           width: abs(v.translation.width), height: abs(v.translation.height))
-                            marquee = r
-                            let hit = cellFrames.filter { $0.value.intersects(r) }.map { $0.key }
-                            manager.selection = marqueeBase.union(hit)
-                        }
-                        .onEnded { _ in marquee = nil })
                 }
             }
         }
@@ -838,6 +860,28 @@ struct PhotosPane: View {
     private func toggle(_ item: MediaItem) {
         guard !manager.running else { return }
         if manager.selection.contains(item.id) { manager.selection.remove(item.id) } else { manager.selection.insert(item.id) }
+    }
+
+    private func updateMarquee() {
+        guard let start = dragStartContent else { return }
+        let current = CGPoint(x: pointerInViewport.x - gridOrigin.x, y: pointerInViewport.y - gridOrigin.y)
+        let r = CGRect(x: min(start.x, current.x), y: min(start.y, current.y), width: abs(current.x - start.x), height: abs(current.y - start.y))
+        marquee = r
+        manager.selection = marqueeBase.union(cellFrames.filter { $0.value.intersects(r) }.map { $0.key })
+    }
+
+    /// Scroll so the next row past the edge becomes visible, then grow the selection into it.
+    private func autoscrollStep(_ proxy: ScrollViewProxy, _ direction: Int) {
+        let visibleTop = -gridOrigin.y, visibleBottom = visibleTop + viewportSize.height
+        let target: (key: String, value: CGRect)?
+        if direction > 0 {
+            target = cellFrames.filter { $0.value.maxY > visibleBottom + 1 }.min { $0.value.maxY < $1.value.maxY }
+        } else {
+            target = cellFrames.filter { $0.value.minY < visibleTop - 1 }.max { $0.value.minY < $1.value.minY }
+        }
+        guard let t = target else { autoscroll.stop(); return }
+        withAnimation(.linear(duration: 0.05)) { proxy.scrollTo(t.key, anchor: direction > 0 ? .bottom : .top) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { updateMarquee() }
     }
 
     /// Click toggles one item; shift-click selects the run between the last click and this one.
@@ -901,6 +945,24 @@ struct PhotosPane: View {
         let p = manager.progress
         return "\(p.phase) \(p.done.formatted()) of \(p.total.formatted()) · \(DeviceManager.gb(p.bytesDone)) of \(DeviceManager.gb(p.bytesTotal))"
     }
+}
+
+struct GridOriginKey: PreferenceKey {
+    static var defaultValue: CGPoint = .zero
+    static func reduce(value: inout CGPoint, nextValue: () -> CGPoint) { value = nextValue() }
+}
+
+/// Repeats a scroll step while the pointer stays near an edge during a drag.
+final class AutoScroller: ObservableObject {
+    private var timer: Timer?
+    private var direction = 0
+    func start(direction: Int, step: @escaping () -> Void) {
+        if timer != nil && self.direction == direction { return }
+        stop()
+        self.direction = direction
+        timer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { _ in step() }
+    }
+    func stop() { timer?.invalidate(); timer = nil; direction = 0 }
 }
 
 struct CellFramesKey: PreferenceKey {
