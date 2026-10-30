@@ -16,7 +16,7 @@ struct BackupPane: View {
     let showLog: () -> Void
 
     private var root: URL { URL(fileURLWithPath: backupRoot) }
-    private var udid: String { Lockdown.firstUDID() ?? "" }
+    private var udid: String { Lockdown.cachedUDID ?? "" }
     private var ready: Bool { manager.device != nil && Lockdown.available && !backups.running && !udid.isEmpty }
 
     var body: some View {

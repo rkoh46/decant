@@ -122,13 +122,14 @@ enum Lockdown {
     static let available = tool("ideviceinfo") != nil
 
     static func tool(_ name: String) -> String? {
-        ["/opt/homebrew/bin", "/usr/local/bin"].map { "\($0)/\(name)" }.first { FileManager.default.isExecutableFile(atPath: $0) }
+        ([Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers").path, "/opt/homebrew/bin", "/usr/local/bin"])
+            .map { "\($0)/\(name)" }.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     static func run(_ name: String, _ args: [String]) -> Data? {
         guard let path = tool(name) else { return nil }
         let p = Process(); p.executableURL = URL(fileURLWithPath: path); p.arguments = args
-        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+        let out = Pipe(); p.standardOutput = out; p.standardError = FileHandle.nullDevice   // an unread stderr pipe can fill and stall the tool
         do { try p.run() } catch { return nil }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
@@ -140,9 +141,13 @@ enum Lockdown {
         return (try? PropertyListSerialization.propertyList(from: d, format: nil)) as? [String: Any]
     }
 
+    /// Last UDID seen; views read this instead of spawning idevice_id on every body evaluation.
+    nonisolated(unsafe) static var cachedUDID: String?
     static func firstUDID() -> String? {
-        run("idevice_id", ["-l"]).flatMap { String(data: $0, encoding: .utf8) }?
+        let u = run("idevice_id", ["-l"]).flatMap { String(data: $0, encoding: .utf8) }?
             .split(whereSeparator: \.isNewline).first.map(String.init)
+        cachedUDID = u
+        return u
     }
 }
 

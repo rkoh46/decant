@@ -59,6 +59,7 @@ int main(int argc, char **argv) {
         else { fprintf(stderr, "unknown argument %s\n", argv[i]); return 2; }
     }
     if (!manifest_path || !board || !ecid || !out) die("need --manifest, --board, --ecid and --out");
+    { FILE *f = fopen(out, "rb"); if (f) { fclose(f); die("refusing to overwrite an existing blob"); } }   /* a saved blob is irreplaceable */
     if (debug) tss_set_debug_level(1);
 
     plist_t manifest = NULL;

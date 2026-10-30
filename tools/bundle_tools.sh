@@ -9,7 +9,7 @@ HELPERS="$APP/Contents/Helpers"
 mkdir -p "$HELPERS"
 cd "$(dirname "$0")/.."
 
-TOOLS=(ideviceinfo idevicediagnostics idevicename idevice_id idevicebackup2 ideviceenterrecovery afcclient idevicecrashreport idevicesyslog idevicescreenshot idevicepair)
+TOOLS=(ideviceinfo idevicediagnostics idevicename idevice_id idevicebackup2 ideviceenterrecovery afcclient idevicecrashreport idevicesyslog idevicescreenshot idevicepair ideviceinstaller)
 BREW=/opt/homebrew/bin
 VENDOR=vendor
 copied=()
@@ -22,6 +22,7 @@ copy_tool() {   # copy_tool <path>
 }
 
 [ -x "$HELPERS/decant-tss" ] && copied+=(decant-tss)
+[ -x "$HELPERS/decant-icon" ] && copied+=(decant-icon)
 for t in "${TOOLS[@]}"; do copy_tool "$BREW/$t"; done
 copy_tool "$BREW/irecovery"
 copy_tool "$VENDOR/idevicerestore/src/idevicerestore"
@@ -49,7 +50,7 @@ for t in "${copied[@]}"; do bundle_libs "$HELPERS/$t"; done
   echo "# Third-party notices"
   echo
   echo "Decant bundles these tools unchanged, each under its own licence. Sources: libimobiledevice.org,"
-  echo "github.com/libimobiledevice/idevicerestore, github.com/futurerestore/futurerestore; the blob saver decant-tss is Decant's own code on libtatsu."
+  echo "github.com/libimobiledevice/idevicerestore, github.com/futurerestore/futurerestore; the blob saver decant-tss (libtatsu) and the icon reader decant-icon (libimobiledevice) are Decant's own code."
   echo
   for t in "${copied[@]}"; do echo "- $t"; done
   echo

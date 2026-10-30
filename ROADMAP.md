@@ -16,6 +16,14 @@ confirmation in the UI.
   that, so Decant deletes the same assets from the Mac's Photos library (PhotoKit) and iCloud removes them from
   the phone.
 - **Backup & Restore** and **Firmware** tabs (see below) are built; they light up as the tools are installed.
+- **Apps**: installed apps with their real icons (SpringBoard service, `tools/decant-icon.c`), app and data sizes
+  (measured in a second pass; the phone takes ~20 s), developer and App Store purchase date from iTunesMetadata
+  (iOS does not expose the install date), sort by size / data / name / added, uninstall with confirmation,
+  install a signed .ipa by button or drag and drop.
+- **Files**: AFC browser over the Media root and every app that allows file sharing (house_arrest, `/Documents`):
+  download, upload, new folder, delete. On My iPhone and iCloud Drive are not reachable over USB.
+- **Blobs are sacred**: a blob already on disk is never requested again or overwritten (the app skips it and
+  `decant-tss` refuses the path); saved blobs are made read-only and locked in Finder.
 
 ## Next, in order
 

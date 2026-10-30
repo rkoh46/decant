@@ -8,6 +8,8 @@ struct DecantApp: App {
     @StateObject private var manager = DeviceManager()
     @StateObject private var backups = BackupService()
     @StateObject private var firmware = FirmwareService()
+    @StateObject private var apps = AppsService()
+    @StateObject private var files = FilesService()
 
     var body: some Scene {
         WindowGroup("Decant") {
@@ -15,6 +17,8 @@ struct DecantApp: App {
                 .environmentObject(manager)
                 .environmentObject(backups)
                 .environmentObject(firmware)
+                .environmentObject(apps)
+                .environmentObject(files)
                 .frame(minWidth: 1000, minHeight: 680)
         }
         .windowStyle(.hiddenTitleBar)
@@ -28,7 +32,7 @@ struct DecantApp: App {
     }
 }
 
-enum Tab { case device, photos, backup, firmware, tools }
+enum Tab { case device, photos, apps, files, backup, firmware, tools }
 
 enum Filter: String, CaseIterable, Identifiable {
     case all = "All Items", photos = "Photos", videos = "Videos", live = "Live Photos"
@@ -59,7 +63,8 @@ struct RootView: View {
     @AppStorage("skipExisting") private var skipExisting = true
     @AppStorage("deleteAfterCopy") private var deleteAfterCopy = false
     @AppStorage("thumbSize") private var thumbSize = 132.0
-    @State private var tab: Tab = ["photos": Tab.photos, "backup": .backup, "firmware": .firmware, "tools": .tools][ProcessInfo.processInfo.environment["DECANT_TAB"] ?? ""] ?? .device   // screenshot aid
+    @State private var tab: Tab = ["photos": Tab.photos, "apps": .apps, "files": .files, "backup": .backup, "firmware": .firmware, "tools": .tools][ProcessInfo.processInfo.environment["DECANT_TAB"] ?? ""] ?? .device   // screenshot aid
+    @EnvironmentObject var files: FilesService
     @State private var filter: Filter? = .all
     @State private var confirmDelete = false
     @State private var spaceWarning: String?
@@ -79,6 +84,14 @@ struct RootView: View {
                 PhotosPane(filter: $filter, thumbSize: $thumbSize, byDate: $byDate, skipExisting: $skipExisting,
                            deleteAfterCopy: $deleteAfterCopy, destURL: destURL, chooseFolder: chooseFolder,
                            showLog: { openWindow(id: "log") }, start: { begin(delete: deleteAfterCopy) })
+            case .apps:
+                AppsPane(openFiles: { app in
+                    files.root = .appDocuments(app.bundleID, app.name); files.path = files.homePath
+                    tab = .files
+                    if let u = Lockdown.firstUDID() { Task { await files.list(udid: u) } }
+                })
+            case .files:
+                FilesPane()
             case .backup:
                 BackupPane(showLog: { openWindow(id: "log") })
             case .firmware:
@@ -114,12 +127,16 @@ struct RootView: View {
                     .keyboardShortcut("1", modifiers: .command)
                 TabButton(title: "Photos", symbol: "photo.on.rectangle", selected: tab == .photos) { tab = .photos }
                     .keyboardShortcut("2", modifiers: .command)
-                TabButton(title: "Backup", symbol: "externaldrive", selected: tab == .backup) { tab = .backup }
+                TabButton(title: "Apps", symbol: "square.grid.2x2", selected: tab == .apps) { tab = .apps }
                     .keyboardShortcut("3", modifiers: .command)
-                TabButton(title: "Firmware", symbol: "cpu", selected: tab == .firmware) { tab = .firmware }
+                TabButton(title: "Files", symbol: "folder", selected: tab == .files) { tab = .files }
                     .keyboardShortcut("4", modifiers: .command)
-                TabButton(title: "Tools", symbol: "wrench.and.screwdriver", selected: tab == .tools) { tab = .tools }
+                TabButton(title: "Backup", symbol: "externaldrive", selected: tab == .backup) { tab = .backup }
                     .keyboardShortcut("5", modifiers: .command)
+                TabButton(title: "Firmware", symbol: "cpu", selected: tab == .firmware) { tab = .firmware }
+                    .keyboardShortcut("6", modifiers: .command)
+                TabButton(title: "Tools", symbol: "wrench.and.screwdriver", selected: tab == .tools) { tab = .tools }
+                    .keyboardShortcut("7", modifiers: .command)
             }
             Spacer()
             deviceChip
@@ -277,9 +294,11 @@ struct TabButton: View {
 // MARK: - Cards
 
 struct Card<Content: View>: View {
+    var fill = false          // stretch to the height offered, content pinned to the top
     @ViewBuilder var content: Content
     var body: some View {
         content
+            .frame(maxHeight: fill ? .infinity : nil, alignment: .top)
             .padding(20)
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
@@ -294,9 +313,10 @@ struct DeviceDashboard: View {
     let destURL: URL?
     let copy: () -> Void, move: () -> Void, chooseFolder: () -> Void, showLog: () -> Void
 
+    // The cards fill the window; the photo destination is a fixed footer like the bottom bar on the other tabs.
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
+        VStack(spacing: 0) {
+            ScrollView {
                 HStack(alignment: .top, spacing: 16) {
                     phoneCard.frame(width: 272)
                     VStack(spacing: 16) {
@@ -304,14 +324,20 @@ struct DeviceDashboard: View {
                         storageCard
                     }
                 }
-                photosRow
+                .padding(24)
+                .frame(maxWidth: .infinity, minHeight: 0, alignment: .top)
+                .containerRelativeFrame(.vertical) { h, _ in max(h, 420) }
             }
-            .padding(24)
+            Divider()
+            photosRow
+                .padding(.horizontal, 24)
+                .frame(height: 60)
+                .background(.bar)
         }
     }
 
     private var phoneCard: some View {
-        Card {
+        Card(fill: true) {
             VStack(spacing: 16) {
                 PhoneView(style: PhoneStyle.style(for: manager.info?.model, name: manager.info?.marketingName),
                           connected: manager.device != nil, screenItems: manager.screenItems)
@@ -413,7 +439,7 @@ struct DeviceDashboard: View {
     }
 
     private var storageCard: some View {
-        Card {
+        Card(fill: true) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text("Storage").font(.system(size: 15, weight: .medium))

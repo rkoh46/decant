@@ -393,7 +393,7 @@ final class FirmwareService: ObservableObject {
         // Ask Apple about what ipsw.me calls signed plus the two newest builds; Apple's answer is what counts.
         var candidates = firmwares.filter { $0.signed }
         for fw in firmwares.prefix(2) where !candidates.contains(fw) { candidates.append(fw) }
-        var saved = 0
+        var saved = 0, kept = 0
         for fw in candidates {
             let manifest = manifests.appendingPathComponent("\(productType)_\(fw.buildid).plist")
             if !FileManager.default.fileExists(atPath: manifest.path) {
@@ -401,20 +401,34 @@ final class FirmwareService: ObservableObject {
                 do { try (try await ManifestFetcher.fetch(ipsw: fw.url)).write(to: manifest) }
                 catch { log("Could not read the manifest for iOS \(fw.version): \(error)"); continue }
             }
-            phase = "Asking Apple about iOS \(fw.version)"
             let out = dir.appendingPathComponent("\(ecid)_\(productType)_\(board)_\(fw.version)-\(fw.buildid)_\(generator).shsh2")
+            // A saved blob is irreplaceable once Apple stops signing that build: never ask again and never overwrite it.
+            if let size = try? FileManager.default.attributesOfItem(atPath: out.path)[.size] as? Int, size > 0 {
+                verdicts[fw.buildid] = true; kept += 1
+                log("Blob for iOS \(fw.version) (\(fw.buildid)) is already saved; keeping it")
+                continue
+            }
+            phase = "Asking Apple about iOS \(fw.version)"
             var args = ["--manifest", manifest.path, "--board", board, "--ecid", ecid, "--generator", generator, "--out", out.path]
             if !basebandSerial.isEmpty && !basebandCert.isEmpty { args += ["--bbsnum", basebandSerial, "--bbcert", basebandCert] }
             let status = await Tools.stream("decant-tss", args) { [weak self] l in if l.contains("error") { self?.log(l) } }
             switch status {
-            case 0: verdicts[fw.buildid] = true; saved += 1; log("Blob saved for iOS \(fw.version) (\(fw.buildid))")
+            case 0:
+                verdicts[fw.buildid] = true; saved += 1; log("Blob saved for iOS \(fw.version) (\(fw.buildid))")
+                Self.protect(out)
             case 3: verdicts[fw.buildid] = false; log("iOS \(fw.version) (\(fw.buildid)) is no longer signed")
             default: log("Blob request for iOS \(fw.version) failed")
             }
         }
-        phase = saved > 0 ? "Blobs saved for \(saved) version\(saved == 1 ? "" : "s")" : "No signed version to save blobs for"
+        phase = saved > 0 ? "Blobs saved for \(saved) version\(saved == 1 ? "" : "s")"
+              : kept > 0 ? "Blobs already saved for \(kept) version\(kept == 1 ? "" : "s")" : "No signed version to save blobs for"
         running = false
         scanBlobs(root: root, ecid: ecid)
+    }
+
+    /// Read-only and locked in Finder, so a stray delete or overwrite asks first.
+    static func protect(_ url: URL) {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o444, .immutable: true], ofItemAtPath: url.path)
     }
 
     func isSigned(_ fw: Firmware) -> Bool { verdicts[fw.buildid] ?? fw.signed }
