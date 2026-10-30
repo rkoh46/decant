@@ -256,23 +256,38 @@ final class FirmwareService: ObservableObject {
 
     /// Save blobs for every version Apple currently signs, with the fixed generator. Safe to run every time the
     /// phone connects: tsschecker overwrites nothing and Apple's TSS answers are cheap.
-    func saveBlobs(ecid: String, productType: String, board: String, root: URL) async {
+    /// Versions tsschecker itself reported as signed or unsigned; Apple's TSS is the truth, ipsw.me can lag.
+    @Published var verdicts: [String: Bool] = [:]
+
+    func saveBlobs(ecid: String, productType: String, board: String, basebandSerial: String, root: URL) async {
         guard !running, Tools.has("tsschecker") else { log("tsschecker is not installed; blobs not saved"); return }
         running = true; phase = "Saving SHSH blobs"; progress = nil
         let dir = Self.blobDir(root, ecid: ecid)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let signed = firmwares.filter { $0.signed }
-        for fw in signed {
-            log("Blobs for iOS \(fw.version) (\(fw.buildid))…")
-            await Tools.stream("tsschecker", ["-d", productType, "-B", board, "-e", ecid, "-i", fw.version, "--buildid", fw.buildid,
-                                              "-s", "--save-path", dir.path, "-g", Self.generator]) { [weak self] l in
-                if l.contains("saved") || l.contains("error") || l.contains("Error") || l.contains("signed") { self?.log(l) }
+        // Try the versions ipsw.me calls signed plus the two newest, in case its flags are stale either way.
+        var candidates = firmwares.filter { $0.signed }
+        for fw in firmwares.prefix(2) where !candidates.contains(fw) { candidates.append(fw) }
+        var saved = 0
+        for fw in candidates {
+            var args = ["-d", productType, "-B", board, "-e", ecid, "-i", fw.version, "--buildid", fw.buildid,
+                        "-s", "--save-path", dir.path, "-g", Self.generator]
+            if !basebandSerial.isEmpty { args += ["--bbsnum", basebandSerial] } else { args.append("--no-baseband") }
+            var signedNow: Bool?
+            await Tools.stream("tsschecker", args) { [weak self] l in
+                if l.contains("IS NOT signed") || l.contains("IS NOT being signed") { signedNow = false }
+                else if l.contains("IS signed") || l.contains("IS being signed") { signedNow = true }
+                if l.lowercased().contains("saved") || l.contains("Error") { self?.log(l) }
             }
+            if let v = signedNow { verdicts[fw.buildid] = v }
+            if signedNow == true { saved += 1; log("Blob saved for iOS \(fw.version) (\(fw.buildid))") }
+            else if signedNow == false { log("iOS \(fw.version) (\(fw.buildid)) is no longer signed, no blob") }
         }
-        phase = "Blobs saved"
+        phase = saved > 0 ? "Blobs saved for \(saved) version\(saved == 1 ? "" : "s")" : "No signed version to save blobs for"
         running = false
         scanBlobs(root: root, ecid: ecid)
     }
+
+    func isSigned(_ fw: Firmware) -> Bool { verdicts[fw.buildid] ?? fw.signed }
 
     func downloadIPSW(_ fw: Firmware, root: URL) async -> URL? {
         guard !running else { return nil }

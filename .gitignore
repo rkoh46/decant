@@ -1,4 +1,5 @@
-Offload.app/
 *.icns
 *.iconset/
 .DS_Store
+Offload.app/
+vendor/

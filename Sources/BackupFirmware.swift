@@ -206,7 +206,7 @@ struct FirmwarePane: View {
             firmware.scanBlobs(root: root, ecid: ecid)
             await firmware.refreshMode()
             if autoSaveBlobs && !ecid.isEmpty && !board.isEmpty && Tools.has("tsschecker") {
-                await firmware.saveBlobs(ecid: ecid, productType: model, board: board, root: root)
+                await firmware.saveBlobs(ecid: ecid, productType: model, board: board, basebandSerial: manager.info?.basebandSerial ?? "", root: root)
             }
         }
     }
@@ -230,7 +230,7 @@ struct FirmwarePane: View {
                         infoRow("Mode") { Text(connected ? firmware.mode.rawValue : "–") }
                     }
                     GridRow {
-                        infoRow("Signed now") { Text(firmware.firmwares.filter { $0.signed }.map { $0.version }.joined(separator: ", ")).lineLimit(1) }
+                        infoRow("Signed now") { Text(firmware.firmwares.filter { firmware.isSigned($0) }.map { $0.version }.joined(separator: ", ")).lineLimit(1) }
                         infoRow("Blobs saved") { Text(connected ? "\(firmware.blobs.count)" : "–").monospacedDigit() }
                     }
                 }
@@ -270,7 +270,7 @@ struct FirmwarePane: View {
             HStack {
                 Text("SHSH blobs").font(.system(size: 13)).foregroundStyle(.secondary)
                 Spacer()
-                Button("Save Blobs Now") { Task { await firmware.saveBlobs(ecid: ecid, productType: model, board: board, root: root) } }
+                Button("Save Blobs Now") { Task { await firmware.saveBlobs(ecid: ecid, productType: model, board: board, basebandSerial: manager.info?.basebandSerial ?? "", root: root) } }
                     .controlSize(.small).disabled(!connected || firmware.running || !Tools.has("tsschecker"))
                 Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([FirmwareService.blobDir(root, ecid: ecid)]) }
                     .controlSize(.small).disabled(!connected)
@@ -329,14 +329,15 @@ struct FirmwarePane: View {
         let downloaded = ipswPath(fw) != nil
         let hasBlob = blob(for: fw) != nil
         let current = fw.version == manager.info?.version
+        let signed = firmware.isSigned(fw)
         return HStack(spacing: 12) {
-            Circle().fill(fw.signed ? Tone.ready : Color(nsColor: .tertiaryLabelColor)).frame(width: 7, height: 7).frame(width: 24)
+            Circle().fill(signed ? Tone.ready : Color(nsColor: .tertiaryLabelColor)).frame(width: 7, height: 7).frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text("iOS \(fw.version)").font(.system(size: 13, weight: .medium))
                     if current { Text("installed").font(.system(size: 11)).foregroundStyle(.secondary) }
                 }
-                Text("\(fw.buildid) · \(DeviceManager.gb(fw.filesize)) · \(fw.releasedate.prefix(10)) · \(fw.signed ? "signed" : "unsigned")\(hasBlob ? " · blob saved" : "")")
+                Text("\(fw.buildid) · \(DeviceManager.gb(fw.filesize)) · \(fw.releasedate.prefix(10)) · \(signed ? "signed" : "unsigned")\(hasBlob ? " · blob saved" : "")")
                     .font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
             }
             Spacer()
@@ -345,7 +346,7 @@ struct FirmwarePane: View {
             } else {
                 Button("Download") { Task { _ = await firmware.downloadIPSW(fw, root: root) } }.disabled(firmware.running)
             }
-            if fw.signed {
+            if signed {
                 Button("Update…") { restoreTarget = (fw, false, false); confirmStep = 1 }.disabled(!connected || !downloaded || firmware.running || !Tools.has("idevicerestore"))
                 Button("Restore…") { restoreTarget = (fw, true, false); confirmStep = 1 }.disabled(!connected || !downloaded || firmware.running || !Tools.has("idevicerestore"))
             } else {
