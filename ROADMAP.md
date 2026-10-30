@@ -56,6 +56,12 @@ confirmation in the UI.
 6. **More device tools**: crash reports (`idevicecrashreport`), live system log (`idevicesyslog`) with filter,
    screenshot (`idevicescreenshot`, needs Developer Mode on iOS 17+), provisioning profiles, wallpaper.
 
+## Defaults
+
+Nothing is tied to a particular drive. Photos go to the user's Pictures folder, backups to Documents/Decant/Backups,
+blobs, manifests and IPSWs to Documents/Decant (Windows: the same folders under the user profile). Every one has a
+Change… button; the chosen paths are saved in the app's preferences.
+
 ## Windows
 
 A separate app sharing the same engine pieces: decant-tss (plain C, builds on Windows), the libimobiledevice

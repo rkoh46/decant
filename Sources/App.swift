@@ -53,7 +53,7 @@ enum Tone {
 struct RootView: View {
     @EnvironmentObject var manager: DeviceManager
     @Environment(\.openWindow) private var openWindow
-    @AppStorage("destination") private var destination = ""
+    @AppStorage("destination") private var destination = (FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first ?? FileManager.default.homeDirectoryForCurrentUser).path
     @AppStorage("byDate") private var byDate = true
     @AppStorage("skipExisting") private var skipExisting = true
     @AppStorage("deleteAfterCopy") private var deleteAfterCopy = false
@@ -667,6 +667,10 @@ struct PhotosPane: View {
     let chooseFolder: () -> Void, showLog: () -> Void, start: () -> Void
     @State private var viewing: MediaItem? = nil
     @State private var deleting: MediaItem? = nil
+    @State private var cellFrames: [String: CGRect] = [:]
+    @State private var marquee: CGRect? = nil
+    @State private var marqueeBase: Set<String> = []
+    @State private var lastClicked: String? = nil
 
     private func count(_ f: Filter) -> Int {
         switch f {
@@ -755,8 +759,11 @@ struct PhotosPane: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: thumbSize, maximum: thumbSize), spacing: 4)], spacing: 4) {
                         ForEach(shown) { item in
                             ThumbCell(item: item, size: thumbSize, selected: manager.selection.contains(item.id))
+                                .background(GeometryReader { g in
+                                    Color.clear.preference(key: CellFramesKey.self, value: [item.id: g.frame(in: .named("grid"))])
+                                })
                                 .onTapGesture(count: 2) { viewing = item }
-                                .onTapGesture { toggle(item) }
+                                .onTapGesture { click(item) }
                                 .contextMenu {
                                     Button("View") { viewing = item }
                                     Button(manager.selection.contains(item.id) ? "Deselect" : "Select") { toggle(item) }
@@ -773,6 +780,29 @@ struct PhotosPane: View {
                         }
                     }
                     .padding(8)
+                    .coordinateSpace(name: "grid")
+                    .onPreferenceChange(CellFramesKey.self) { cellFrames.merge($0) { _, new in new } }
+                    .overlay {
+                        if let m = marquee {
+                            Rectangle().fill(Color.accentColor.opacity(0.12))
+                                .overlay(Rectangle().strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1))
+                                .frame(width: m.width, height: m.height)
+                                .position(x: m.midX, y: m.midY)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    // Drag across the grid to select everything the rectangle touches (shift adds to the selection).
+                    .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .named("grid"))
+                        .onChanged { v in
+                            guard !manager.running else { return }
+                            if marquee == nil { marqueeBase = NSEvent.modifierFlags.contains(.shift) ? manager.selection : [] }
+                            let r = CGRect(x: min(v.startLocation.x, v.location.x), y: min(v.startLocation.y, v.location.y),
+                                           width: abs(v.translation.width), height: abs(v.translation.height))
+                            marquee = r
+                            let hit = cellFrames.filter { $0.value.intersects(r) }.map { $0.key }
+                            manager.selection = marqueeBase.union(hit)
+                        }
+                        .onEnded { _ in marquee = nil })
                 }
             }
         }
@@ -797,6 +827,19 @@ struct PhotosPane: View {
     private func toggle(_ item: MediaItem) {
         guard !manager.running else { return }
         if manager.selection.contains(item.id) { manager.selection.remove(item.id) } else { manager.selection.insert(item.id) }
+    }
+
+    /// Click toggles one item; shift-click selects the run between the last click and this one.
+    private func click(_ item: MediaItem) {
+        guard !manager.running else { return }
+        let order = shown
+        if NSEvent.modifierFlags.contains(.shift), let last = lastClicked,
+           let a = order.firstIndex(where: { $0.id == last }), let b = order.firstIndex(where: { $0.id == item.id }) {
+            manager.selection.formUnion(order[min(a, b)...max(a, b)].map { $0.id })
+        } else {
+            toggle(item)
+        }
+        lastClicked = item.id
     }
 
     private var bottomBar: some View {
@@ -847,6 +890,11 @@ struct PhotosPane: View {
         let p = manager.progress
         return "\(p.phase) \(p.done.formatted()) of \(p.total.formatted()) · \(DeviceManager.gb(p.bytesDone)) of \(DeviceManager.gb(p.bytesTotal))"
     }
+}
+
+struct CellFramesKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) { value.merge(nextValue()) { _, new in new } }
 }
 
 // MARK: - Viewer: the item at full size, fetched from the phone on demand

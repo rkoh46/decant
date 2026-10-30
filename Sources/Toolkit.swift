@@ -162,10 +162,10 @@ final class BackupService: ObservableObject {
     private var process: Process?
     var log: (String) -> Void = { _ in }
 
+    /// Where backups go unless the user picks a folder: Documents/Decant/Backups (Windows: Documents\Decant\Backups).
     static var defaultRoot: URL {
-        let ext = URL(fileURLWithPath: "/Volumes/OS_Backups/Decant/Backups")
-        if FileManager.default.fileExists(atPath: "/Volumes/OS_Backups") { return ext }
-        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Decant Backups")
+        (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ?? FileManager.default.homeDirectoryForCurrentUser)
+            .appendingPathComponent("Decant/Backups")
     }
 
     func scan(_ root: URL) {
@@ -311,10 +311,10 @@ final class FirmwareService: ObservableObject {
         return SHA384.hash(data: bytes).prefix(32).map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Blobs, manifests and IPSWs go to Documents/Decant unless the user picks a folder.
     static var defaultRoot: URL {
-        let ext = URL(fileURLWithPath: "/Volumes/OS_Backups/Decant")
-        if FileManager.default.fileExists(atPath: "/Volumes/OS_Backups") { return ext }
-        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Decant")
+        (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ?? FileManager.default.homeDirectoryForCurrentUser)
+            .appendingPathComponent("Decant")
     }
     static func blobDir(_ root: URL, ecid: String) -> URL { root.appendingPathComponent("Blobs/\(ecid)") }
     static func ipswDir(_ root: URL) -> URL { root.appendingPathComponent("IPSW") }

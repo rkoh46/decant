@@ -4,17 +4,16 @@
 import Foundation
 import Photos
 
-@MainActor
 enum PhotoLibraryDeleter {
-    static var authorized: Bool { PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized }
+    nonisolated static var authorized: Bool { PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized }
 
-    static func requestAccess() async -> Bool {
+    nonisolated static func requestAccess() async -> Bool {
         await PHPhotoLibrary.requestAuthorization(for: .readWrite) == .authorized
     }
 
     /// Library assets for the phone's files. Match by original filename first; the capture date only breaks
     /// ties, because saved and shared images carry a Photos date that differs from the file date the phone reports.
-    static func match(_ items: [MediaItem]) -> (found: [MediaItem: PHAsset], missing: [MediaItem]) {
+    nonisolated static func match(_ items: [MediaItem]) -> (found: [MediaItem: PHAsset], missing: [MediaItem]) {
         var found: [MediaItem: PHAsset] = [:]
         var missing: [MediaItem] = []
         let wanted = Set(items.map { $0.name.lowercased() })
@@ -43,7 +42,7 @@ enum PhotoLibraryDeleter {
         return (found, missing)
     }
 
-    private static func matchByShape(_ item: MediaItem) -> PHAsset? {
+    nonisolated private static func matchByShape(_ item: MediaItem) -> PHAsset? {
         guard let date = item.date, item.pixelWidth > 0 else { return nil }
         let options = PHFetchOptions()
         options.includeHiddenAssets = true
@@ -59,14 +58,15 @@ enum PhotoLibraryDeleter {
     }
 
     /// Delete the matched assets in one change (one system confirmation). Returns the items that were deleted.
-    static func delete(_ items: [MediaItem]) async throws -> (deleted: [MediaItem], missing: [MediaItem]) {
+    nonisolated static func delete(_ items: [MediaItem]) async throws -> (deleted: [MediaItem], missing: [MediaItem]) {
         if !authorized {
             let granted = await requestAccess()
             guard granted else {
                 throw NSError(domain: "Decant", code: 1, userInfo: [NSLocalizedDescriptionKey: "Decant was not allowed to access the Photos library (System Settings → Privacy & Security → Photos)"])
             }
         }
-        let (found, missing) = match(items)
+        // The library scan is the slow part; keep it off the main thread so the window stays responsive.
+        let (found, missing) = await Task.detached(priority: .userInitiated) { match(items) }.value
         guard !found.isEmpty else { return ([], missing) }
         try await PHPhotoLibrary.shared().performChanges {
             PHAssetChangeRequest.deleteAssets(Array(found.values) as NSArray)

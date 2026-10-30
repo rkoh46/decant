@@ -378,9 +378,11 @@ final class DeviceManager: NSObject, ObservableObject {
     /// iCloud route: delete the same assets from the Mac's Photos library; iCloud removes them from the phone.
     private func deleteViaICloud(_ items: [MediaItem]) async -> Int {
         addLog("Deleting \(items.count) items through iCloud (Photos library on this Mac)…")
+        progress.phase = "Matching in Photos library"
         do {
             let (deleted, missing) = try await PhotoLibraryDeleter.delete(items)
             for i in deleted { i.status = .deleted }
+            removeFromList(deleted)
             for i in missing { i.status = .failed("not found in the Mac's Photos library") }
             if !missing.isEmpty { addLog("\(missing.count) items were not in the Mac's Photos library yet (iCloud still syncing?)") }
             addLog("Deleted \(deleted.count) through iCloud; the iPhone drops them when it syncs (Recently Deleted keeps them 30 days)")
@@ -390,6 +392,14 @@ final class DeviceManager: NSObject, ObservableObject {
             for i in items { i.status = .failed(error.localizedDescription) }
             return 0
         }
+    }
+
+    /// Items the user deleted leave the grid now; the phone's own removal notice later finds nothing to do.
+    private func removeFromList(_ gone: [MediaItem]) {
+        let ids = Set(gone.map { $0.id })
+        items.removeAll { ids.contains($0.id) }
+        selection.subtract(ids)
+        for g in gone { byFile[ObjectIdentifier(g.file)] = nil }
     }
 
     private func deleteFromPhone(_ camera: ICCameraDevice, _ toDelete: [MediaItem]) async -> Int {
@@ -420,6 +430,7 @@ final class DeviceManager: NSObject, ObservableObject {
             }
         }
         addLog("Deleted \(deleted) of \(toDelete.count) from the iPhone" + (deleted < toDelete.count ? " (check Recently Deleted and the iCloud Photos setting)" : ""))
+        removeFromList(toDelete.filter { $0.status == .deleted })
         return deleted
     }
 
@@ -677,6 +688,7 @@ extension DeviceManager: ICCameraDeviceDelegate {
         let gone = Set(items.map { ObjectIdentifier($0) })
         removedByPhone.formUnion(gone)
         for k in gone { byFile[k]?.status = .deleted }
+        self.selection.subtract(self.items.filter { gone.contains(ObjectIdentifier($0.file)) }.map { $0.id })
         self.items.removeAll { gone.contains(ObjectIdentifier($0.file)) }
         for k in gone { byFile[k] = nil }
     }
