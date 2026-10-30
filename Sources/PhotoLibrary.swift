@@ -29,13 +29,33 @@ enum PhotoLibraryDeleter {
         }
         for item in items {
             let candidates = byName[item.name.lowercased()] ?? []
-            if candidates.isEmpty { missing.append(item); continue }
-            if candidates.count == 1 || item.date == nil { found[item] = candidates[0]; continue }
-            found[item] = candidates.min { a, b in
-                abs((a.creationDate ?? .distantPast).timeIntervalSince(item.date!)) < abs((b.creationDate ?? .distantPast).timeIntervalSince(item.date!))
+            if candidates.count == 1 || (candidates.count > 1 && item.date == nil) { found[item] = candidates[0]; continue }
+            if candidates.count > 1 {
+                found[item] = candidates.min { a, b in
+                    abs((a.creationDate ?? .distantPast).timeIntervalSince(item.date!)) < abs((b.creationDate ?? .distantPast).timeIntervalSince(item.date!))
+                }
+                continue
             }
+            // Saved and shared images keep a different filename in Photos: fall back to the same pixel size
+            // captured within a minute of the phone's date.
+            if let asset = matchByShape(item) { found[item] = asset } else { missing.append(item) }
         }
         return (found, missing)
+    }
+
+    private static func matchByShape(_ item: MediaItem) -> PHAsset? {
+        guard let date = item.date, item.pixelWidth > 0 else { return nil }
+        let options = PHFetchOptions()
+        options.includeHiddenAssets = true
+        options.predicate = NSPredicate(format: "creationDate >= %@ AND creationDate <= %@ AND pixelWidth == %d AND pixelHeight == %d",
+                                        date.addingTimeInterval(-60) as NSDate, date.addingTimeInterval(60) as NSDate,
+                                        item.pixelWidth, item.pixelHeight)
+        let r = PHAsset.fetchAssets(with: item.isVideo ? .video : .image, options: options)
+        var best: PHAsset?
+        r.enumerateObjects { a, _, _ in
+            if best == nil || abs((a.creationDate ?? .distantPast).timeIntervalSince(date)) < abs((best!.creationDate ?? .distantPast).timeIntervalSince(date)) { best = a }
+        }
+        return best
     }
 
     /// Delete the matched assets in one change (one system confirmation). Returns the items that were deleted.

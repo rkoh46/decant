@@ -1,6 +1,7 @@
 import SwiftUI
 import ImageCaptureCore
 import AVKit
+import Photos
 
 @main
 struct DecantApp: App {
@@ -187,7 +188,10 @@ struct RootView: View {
                 if !PhotoLibraryDeleter.authorized { _ = await PhotoLibraryDeleter.requestAccess() }
                 let (found, missing) = PhotoLibraryDeleter.match(newest)
                 for item in newest {
-                    if let a = found[item] { report("MATCH \(item.name) → library asset \(a.localIdentifier.prefix(8))… \(a.creationDate?.formatted() ?? "no date")") }
+                    if let a = found[item] {
+                        let libName = PHAssetResource.assetResources(for: a).first?.originalFilename ?? "?"
+                        report("MATCH \(item.name) (\(item.pixelWidth)×\(item.pixelHeight)) → \(libName) \(a.pixelWidth)×\(a.pixelHeight) \(a.creationDate?.formatted() ?? "no date")")
+                    }
                     else { report("MISSING \(item.name) (phone date \(item.date?.formatted() ?? "none"))") }
                 }
                 report("MATCH RESULT: \(found.count) of \(newest.count) found, \(missing.count) missing")

@@ -19,6 +19,7 @@ final class MediaItem: ObservableObject, Identifiable, Hashable {
     let isVideo: Bool
     let isLivePhoto: Bool
     let duration: Double
+    let pixelWidth: Int, pixelHeight: Int
     @Published var thumbnail: CGImage?
     @Published var status: Status = .pending
 
@@ -32,6 +33,7 @@ final class MediaItem: ObservableObject, Identifiable, Hashable {
         isVideo = ["mov", "mp4", "m4v", "avi", "3gp"].contains(ext) || uti.contains("movie") || uti.contains("video")
         isLivePhoto = !isVideo && (file.sidecarFiles ?? []).contains { ($0.name ?? "").lowercased().hasSuffix(".mov") }
         duration = file.duration
+        pixelWidth = file.width; pixelHeight = file.height
         id = "\(name)|\(size)|\(date?.timeIntervalSince1970 ?? 0)"
     }
 
