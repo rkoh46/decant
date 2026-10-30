@@ -2,6 +2,7 @@
 // changes the phone (restore, update, delete a backup) is started only from a confirmed UI action; this file
 // never decides to run one on its own. Output streams into the log so the user can see exactly what ran.
 import Foundation
+import CryptoKit
 
 // MARK: - Tool locations and running
 
@@ -11,6 +12,10 @@ enum Tools {
         var candidates = [Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/\(name)").path,
                           "/opt/homebrew/bin/\(name)", "/usr/local/bin/\(name)"]
         let vendor = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Decant/vendor")
+        if name == "tsschecker", let found = FileManager.default.enumerator(atPath: "\(vendor.path)/tsschecker-new")?
+            .compactMap({ $0 as? String }).first(where: { ($0 as NSString).lastPathComponent == "tsschecker" }) {
+            candidates.insert("\(vendor.path)/tsschecker-new/\(found)", at: 0)
+        }
         candidates += ["\(vendor.path)/tsschecker/\(name)", "\(vendor.path)/futurerestore/\(name)",
                        "\(vendor.path)/idevicerestore/src/\(name)"]
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
@@ -222,6 +227,11 @@ final class FirmwareService: ObservableObject {
     var log: (String) -> Void = { _ in }
 
     static let generator = "0x1111111111111111"      // the community convention; set this on the phone before a futurerestore
+    /// ApNonce an A12+ chip derives from that generator: SHA-384 of the eight generator bytes, first 32 bytes.
+    static var generatorNonce: String {
+        let bytes = Data([0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11])
+        return SHA384.hash(data: bytes).prefix(32).map { String(format: "%02x", $0) }.joined()
+    }
 
     static var defaultRoot: URL {
         let ext = URL(fileURLWithPath: "/Volumes/OS_Backups/Decant")
@@ -270,13 +280,13 @@ final class FirmwareService: ObservableObject {
         var saved = 0
         for fw in candidates {
             var args = ["-d", productType, "-B", board, "-e", ecid, "-i", fw.version, "--buildid", fw.buildid,
-                        "-s", "--save-path", dir.path, "-g", Self.generator]
+                        "-s", "--save-path", dir.path, "-g", Self.generator, "--apnonce", Self.generatorNonce]
             if !basebandSerial.isEmpty { args += ["--bbsnum", basebandSerial] } else { args.append("--no-baseband") }
             var signedNow: Bool?
             await Tools.stream("tsschecker", args) { [weak self] l in
                 if l.contains("IS NOT signed") || l.contains("IS NOT being signed") { signedNow = false }
                 else if l.contains("IS signed") || l.contains("IS being signed") { signedNow = true }
-                if l.lowercased().contains("saved") || l.contains("Error") { self?.log(l) }
+                if l.lowercased().contains("saved") || l.contains("Error") || l.contains("TSS server returned") { self?.log(l) }
             }
             if let v = signedNow { verdicts[fw.buildid] = v }
             if signedNow == true { saved += 1; log("Blob saved for iOS \(fw.version) (\(fw.buildid))") }
