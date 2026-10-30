@@ -754,6 +754,14 @@ struct PhotosPane: View {
                         .font(.system(size: 48, weight: .light)).foregroundStyle(.tertiary)
                     Text(manager.statusText).foregroundStyle(.secondary)
                     if manager.device != nil && !manager.catalogComplete && !manager.locked { ProgressView().controlSize(.small) }
+                    if manager.device != nil && !manager.sessionOpen && !manager.locked {
+                        VStack(spacing: 6) {
+                            Button("Retry") { manager.retryConnection() }.padding(.top, 4)
+                            if manager.connectAttempts >= 3 {
+                                Text("Still nothing after three tries: unplug and replug the cable").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {

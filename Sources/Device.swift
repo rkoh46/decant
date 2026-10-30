@@ -155,6 +155,7 @@ final class DeviceManager: NSObject, ObservableObject {
     @Published var locked = false
     @Published var sessionOpen = false
     @Published var canDelete = true           // false when the phone withholds delete (iCloud Photos on)
+    @Published var connectAttempts = 0        // watchdog retries of a session open that never completed
     private var removedByPhone = Set<ObjectIdentifier>()
     @Published var running = false
     @Published var progress = OffloadProgress()
@@ -208,7 +209,34 @@ final class DeviceManager: NSObject, ObservableObject {
             liveTimer?.invalidate()
             liveTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.refreshLive() }
         }
+        connectAttempts = 0
+        openSession(camera)
+    }
+
+    /// Ask for the session and keep a watchdog on it: a previous instance that quit mid-session can leave the
+    /// camera service hanging, in which case the open never completes and never errors either.
+    private func openSession(_ camera: ICCameraDevice) {
         camera.requestOpenSession()
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            guard let self, self.device === camera, !self.sessionOpen, !self.locked else { return }
+            guard self.connectAttempts < 3 else {
+                self.addLog("The iPhone's camera connection is not answering; unplug and replug the cable")
+                return
+            }
+            self.connectAttempts += 1
+            self.addLog("Connection is taking too long, retrying (\(self.connectAttempts) of 3)")
+            if camera.hasOpenSession { camera.requestCloseSession() }
+            self.openSession(camera)
+        }
+    }
+
+    /// The Retry button: start the connection over.
+    func retryConnection() {
+        guard let d = device else { return }
+        connectAttempts = 0
+        if d.hasOpenSession { d.requestCloseSession() }
+        openSession(d)
     }
 
     func disconnect() {
@@ -225,7 +253,8 @@ final class DeviceManager: NSObject, ObservableObject {
         guard let d = device else { return }
         items = []; byFile = [:]; selection = []; catalogComplete = false
         if d.hasOpenSession { d.requestCloseSession() }
-        d.requestOpenSession()
+        connectAttempts = 0
+        openSession(d)
     }
 
     private func flushAdds() {
@@ -675,7 +704,7 @@ extension DeviceManager: ICCameraDeviceDelegate {
             // Locked or not yet trusted: keep trying until the phone lets us in.
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                 guard let self, let d = self.device, d === device, !self.sessionOpen else { return }
-                d.requestOpenSession()
+                self.openSession(d)
             }
             return
         }
