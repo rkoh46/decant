@@ -10,8 +10,12 @@ confirmation in the UI.
 - **Device** dashboard: model-accurate render with the camera roll on its screen, info table (iOS version, model
   and model number, region, masked serial, battery level and health, capacity), storage bar, tools (restart,
   shut down, rename), live battery/storage every 30 s.
-- **Photos**: list the camera roll, thumbnails, filters, copy with size verification and date stamping,
-  year/month folders, skip existing, delete only verified files, test mode (`--test-offload N DIR`).
+- **Photos**: list the camera roll, thumbnails, filters, viewer (double-click), copy with size verification and
+  date stamping, year/month folders, skip existing, per-item copy and delete from the context menu, test mode
+  (`--test-offload N DIR`). Deletes go over USB when the phone allows it; with iCloud Photos on, iOS refuses
+  that, so Decant deletes the same assets from the Mac's Photos library (PhotoKit) and iCloud removes them from
+  the phone.
+- **Backup & Restore** and **Firmware** tabs (see below) are built; they light up as the tools are installed.
 
 ## Next, in order
 
@@ -20,11 +24,10 @@ confirmation in the UI.
    `Decant.app/Contents/Helpers` with their dylibs re-pathed (`install_name_tool`), so the public `.dmg` works
    without Homebrew. All are LGPL (2.1 or 3.0): include each licence and a THIRD-PARTY-NOTICES file. The app
    prefers the bundled copies and falls back to Homebrew's.
-2. **Backup & Restore** (`idevicebackup2`). Full backups to a chosen folder (default
-   `OS_Backups/Decant/Backups/<device>/<date>`), encrypted backups (needed for Health and passwords), restore a
-   backup to the device, list backups with date, size and iOS version, delete old ones. Progress parsed from the
-   tool's output.
-3. **Firmware** tab.
+2. **Backup & Restore**: done in the UI; verify a real backup and restore cycle once `idevicebackup2` runs
+   from the bundle.
+3. **Firmware** tab: done in the UI; needs `tsschecker`, `idevicerestore`, `irecovery` and `futurerestore`
+   present (vendored or bundled) to light up. Still to verify end to end on a spare device.
    - **SHSH blobs**: saved automatically each time the phone connects, for every version Apple is signing, with
      the generator `0x1111111111111111` (so a future restore can set a matching nonce) and the device's current
      APNonce when available. Stored per ECID under `OS_Backups/Decant/Blobs/<ECID>/`. List saved blobs, verify

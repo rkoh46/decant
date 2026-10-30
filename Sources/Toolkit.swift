@@ -208,7 +208,7 @@ struct BlobInfo: Identifiable, Hashable {
     var id: String { url.path }
 }
 
-enum RecoveryMode: String { case none = "Normal", recovery = "Recovery", dfu = "DFU", unknown = "Unknown" }
+enum RecoveryMode: String { case none = "Normal", recovery = "Recovery", dfu = "DFU", unknown = "Unknown", unavailable = "–" }
 
 @MainActor
 final class FirmwareService: ObservableObject {
@@ -298,6 +298,7 @@ final class FirmwareService: ObservableObject {
 
     func refreshMode() async {
         var out = ""
+        guard Tools.has("irecovery") else { mode = .unavailable; return }
         let status = await Tools.stream("irecovery", ["-q"]) { out += $0 + "\n" }
         if status == nil { mode = .none; return }
         if let r = out.range(of: #"MODE:\s*(\w+)"#, options: .regularExpression) {
