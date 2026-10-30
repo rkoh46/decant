@@ -1,4 +1,5 @@
-// Renders the Decant app icon (blue gradient tile with the iPhone-and-arrow symbol) into an .iconset.
+// Renders the Decant app icon into an .iconset: one flat graphite tile, one white glyph (a phone handing its
+// contents forward). No gradient tile, no glow: a flat mark in one solid colour.
 // Usage: swift tools/make_icon.swift Decant.iconset
 import AppKit
 
@@ -10,16 +11,19 @@ func render(_ px: Int) -> Data {
     image.lockFocus()
     let inset = CGFloat(px) * 0.09              // macOS icons sit inside a margin
     let rect = NSRect(x: inset, y: inset, width: CGFloat(px) - 2 * inset, height: CGFloat(px) - 2 * inset)
-    let path = NSBezierPath(roundedRect: rect, xRadius: rect.width * 0.225, yRadius: rect.width * 0.225)
-    NSGradient(starting: NSColor(calibratedRed: 0.20, green: 0.55, blue: 1.00, alpha: 1),
-               ending: NSColor(calibratedRed: 0.28, green: 0.22, blue: 0.85, alpha: 1))!
-        .draw(in: path, angle: -60)
-    let config = NSImage.SymbolConfiguration(pointSize: rect.width * 0.52, weight: .medium)
+    let tile = NSBezierPath(roundedRect: rect, xRadius: rect.width * 0.225, yRadius: rect.width * 0.225)
+    NSColor(calibratedRed: 0.11, green: 0.11, blue: 0.12, alpha: 1).setFill()
+    tile.fill()
+    // A single hairline on the edge reads as a machined surface without becoming a glow.
+    NSColor(calibratedWhite: 1, alpha: 0.10).setStroke()
+    tile.lineWidth = max(1, CGFloat(px) / 256)
+    tile.stroke()
+    let config = NSImage.SymbolConfiguration(pointSize: rect.width * 0.5, weight: .regular)
     if let symbol = NSImage(systemSymbolName: "iphone.and.arrow.forward", accessibilityDescription: nil)?
         .withSymbolConfiguration(config) {
         let tinted = NSImage(size: symbol.size, flipped: false) { r in
             symbol.draw(in: r)
-            NSColor.white.set()
+            NSColor(calibratedWhite: 0.95, alpha: 1).set()
             r.fill(using: .sourceAtop)
             return true
         }

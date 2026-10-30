@@ -70,6 +70,40 @@ struct DeviceInfo {
 
 struct DeviceStorage { var capacity: Int; var free: Int; var photos: Int? = nil; var apps: Int? = nil }
 
+/// What the connected model looks like from the front, derived from its identifier (iPhone16,2 ...).
+struct PhoneStyle {
+    enum Cutout { case none, notch, island }
+    var cutout: Cutout = .island
+    var homeButton = false
+    var fold = false                 // Duo: opens into a wider panel with a centre crease
+    var width: CGFloat = 150, height: CGFloat = 312
+    var corner: CGFloat = 30, bezel: CGFloat = 6
+
+    static func style(for identifier: String?, name: String?) -> PhoneStyle {
+        var s = PhoneStyle()
+        guard let id = identifier, id.hasPrefix("iPhone"),
+              let comma = id.firstIndex(of: ","),
+              let major = Int(id.dropFirst(6)[..<comma]), let minor = Int(id[id.index(after: comma)...]) else {
+            if (name ?? "").localizedCaseInsensitiveContains("Duo") { s.fold = true }
+            return s
+        }
+        if (name ?? "").localizedCaseInsensitiveContains("Duo") { s.fold = true; return s }
+        // Home-button era: 6/6s/7/8 and the SE line.
+        let homeButton = major <= 9 || [(10, 1), (10, 2), (10, 4), (10, 5), (12, 8), (14, 6)].contains { $0 == (major, minor) }
+        // Notch era: X/XS/XR through 14 and 14 Plus, plus the 16e.
+        let notch = !homeButton && (major <= 13 || [(14, 2), (14, 3), (14, 4), (14, 5), (14, 7), (14, 8), (17, 5)].contains { $0 == (major, minor) })
+        s.homeButton = homeButton
+        s.cutout = homeButton ? .none : (notch ? .notch : .island)
+        // Size class: Plus/Max/XR/XS Max bodies are bigger, minis smaller.
+        let big = [(10, 2), (10, 5), (10, 6), (11, 4), (11, 6), (12, 5), (13, 4), (14, 3), (14, 8), (15, 3), (15, 5), (16, 2), (17, 2), (17, 4), (18, 2)].contains { $0 == (major, minor) }
+        let mini = [(13, 1), (14, 4)].contains { $0 == (major, minor) }
+        if homeButton { s.width = 148; s.height = 296; s.corner = 22; s.bezel = 7 }
+        if big { s.width = 158; s.height = 328 }
+        if mini { s.width = 140; s.height = 292 }
+        return s
+    }
+}
+
 struct BatteryInfo {
     var level: Int?, charging: Bool?
     var cycleCount: Int?, designCapacity: Int?, maxCapacity: Int?
@@ -127,6 +161,7 @@ final class DeviceManager: NSObject, ObservableObject {
     func cancel() { cancelled = true }
 
     private let browser = ICDeviceBrowser()
+    private var liveTimer: Timer?
     private var byFile: [ObjectIdentifier: MediaItem] = [:]
     private var pendingAdds: [MediaItem] = []
     private var flushScheduled = false
@@ -142,6 +177,14 @@ final class DeviceManager: NSObject, ObservableObject {
 
     // MARK: Device
 
+    /// Short form for table cells; `statusText` is the sentence for captions.
+    var statusWord: String {
+        guard device != nil else { return "–" }
+        if locked { return "Locked" }
+        if !sessionOpen { return "Connecting" }
+        return catalogComplete ? "Ready" : "Reading library"
+    }
+
     var statusText: String {
         guard device != nil else { return "No iPhone connected" }
         if locked { return "Locked: unlock and tap Trust" }
@@ -156,10 +199,16 @@ final class DeviceManager: NSObject, ObservableObject {
         camera.delegate = self
         locked = camera.isAccessRestrictedAppleDevice
         addLog("Found \(camera.name ?? "iPhone")")
+        if Lockdown.available {
+            queryLockdown()
+            liveTimer?.invalidate()
+            liveTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.refreshLive() }
+        }
         camera.requestOpenSession()
     }
 
     func disconnect() {
+        liveTimer?.invalidate(); liveTimer = nil
         if let d = device, d.hasOpenSession { d.requestCloseSession() }
         device = nil
         info = nil; storage = nil; battery = nil
@@ -180,6 +229,11 @@ final class DeviceManager: NSObject, ObservableObject {
         guard !pendingAdds.isEmpty else { return }
         items.append(contentsOf: pendingAdds)
         pendingAdds = []
+    }
+
+    /// Newest photos shown on the rendered phone's screen.
+    var screenItems: [MediaItem] {
+        Array(items.filter { !$0.isVideo }.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }.prefix(12))
     }
 
     // MARK: Totals
@@ -362,10 +416,67 @@ final class DeviceManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: Device tools (lockdown one-liners)
+
+    func restart() { deviceCommand("idevicediagnostics", ["restart"], "Restarting the iPhone") }
+    func shutDown() { deviceCommand("idevicediagnostics", ["shutdown"], "Shutting the iPhone down") }
+    func rename(_ name: String) { deviceCommand("idevicename", [name], "Renaming the iPhone to \(name)") }
+
+    private func deviceCommand(_ tool: String, _ args: [String], _ what: String) {
+        addLog(what)
+        Task.detached { () -> Void in
+            var a: [String] = []
+            if let udid = Lockdown.firstUDID() { a = ["-u", udid] }
+            let ok = Lockdown.run(tool, a + args) != nil
+            await MainActor.run { self.addLog(ok ? "\(what): done" : "\(what): failed (is the iPhone unlocked and trusted?)") }
+        }
+    }
+
     // MARK: Lockdown (libimobiledevice)
 
+    /// Battery and storage only: cheap, and they change while the phone sits on the cable.
+    func refreshLive() {
+        guard device != nil, Lockdown.available else { return }
+        Task.detached(priority: .utility) { [weak self] () -> Void in
+            var args: [String] = []
+            if let udid = Lockdown.firstUDID() { args = ["-u", udid] }
+            let batt = Lockdown.plist("ideviceinfo", args + ["-x", "-q", "com.apple.mobile.battery"])
+            let disk = Lockdown.plist("ideviceinfo", args + ["-x", "-q", "com.apple.disk_usage"])
+            let diag = Lockdown.plist("idevicediagnostics", args + ["ioregentry", "AppleSmartBattery"])
+            await MainActor.run {
+                guard let self else { return }
+                self.applyBattery(batt, diag)
+                self.applyDisk(disk)
+            }
+        }
+    }
+
+    private func applyBattery(_ batt: [String: Any]?, _ diag: [String: Any]?) {
+        func find(_ key: String, in any: Any?) -> Int? {
+            guard let dict = any as? [String: Any] else { return nil }
+            if let v = dict[key] as? Int { return v }
+            for v in dict.values { if let r = find(key, in: v) { return r } }
+            return nil
+        }
+        var b = BatteryInfo()
+        b.level = batt?["BatteryCurrentCapacity"] as? Int
+        b.charging = batt?["BatteryIsCharging"] as? Bool
+        b.cycleCount = find("CycleCount", in: diag)
+        b.designCapacity = find("DesignCapacity", in: diag)
+        b.maxCapacity = find("NominalChargeCapacity", in: diag) ?? find("AppleRawMaxCapacity", in: diag)
+        if b.level != nil || b.cycleCount != nil { battery = b }
+    }
+
+    private func applyDisk(_ d: [String: Any]?) {
+        if let d, let cap = d["TotalDiskCapacity"] as? Int, let free = d["TotalDataAvailable"] as? Int {
+            storage = DeviceStorage(capacity: cap, free: free,
+                                    photos: d["CameraUsage"] as? Int ?? d["PhotoUsage"] as? Int,
+                                    apps: d["MobileApplicationUsage"] as? Int)
+        }
+    }
+
     private func queryLockdown() {
-        Task.detached(priority: .userInitiated) { [weak self] in
+        Task.detached(priority: .userInitiated) { [weak self] () -> Void in
             var args: [String] = []
             if let udid = Lockdown.firstUDID() { args = ["-u", udid] }
             let general = Lockdown.plist("ideviceinfo", args + ["-x"])
@@ -391,19 +502,8 @@ final class DeviceManager: NSObject, ObservableObject {
                 } else {
                     self.addLog("Could not read device details (is the iPhone paired with this Mac?)")
                 }
-                var b = BatteryInfo()
-                b.level = batt?["BatteryCurrentCapacity"] as? Int
-                b.charging = batt?["BatteryIsCharging"] as? Bool
-                let entry = (diag?["IORegistry"] as? [String: Any]) ?? diag ?? [:]
-                b.cycleCount = entry["CycleCount"] as? Int
-                b.designCapacity = entry["DesignCapacity"] as? Int
-                b.maxCapacity = (entry["NominalChargeCapacity"] as? Int) ?? (entry["AppleRawMaxCapacity"] as? Int)
-                if b.level != nil || b.cycleCount != nil { self.battery = b }
-                if let d = disk, let cap = d["TotalDiskCapacity"] as? Int, let free = d["TotalDataAvailable"] as? Int {
-                    self.storage = DeviceStorage(capacity: cap, free: free,
-                                                 photos: d["CameraUsage"] as? Int ?? d["PhotoUsage"] as? Int,
-                                                 apps: d["MobileApplicationUsage"] as? Int)
-                }
+                self.applyBattery(batt, diag)
+                self.applyDisk(disk)
             }
         }
     }
@@ -514,6 +614,7 @@ extension DeviceManager: ICCameraDeviceDelegate {
         if info == nil { queryDetails(device) }
         catalogComplete = true
         selection = Set(items.map { $0.id })
+        screenItems.forEach { if $0.thumbnail == nil { $0.file.requestThumbnail() } }
         addLog("Library read: \(photoCount) photos, \(videoCount) videos (\(liveCount) Live Photos), \(Self.gb(totalBytes))")
     }
 

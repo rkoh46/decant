@@ -9,7 +9,7 @@ struct DecantApp: App {
         WindowGroup("Decant") {
             RootView()
                 .environmentObject(manager)
-                .frame(minWidth: 1000, minHeight: 660)
+                .frame(minWidth: 1000, minHeight: 680)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
@@ -21,14 +21,14 @@ struct DecantApp: App {
     }
 }
 
-enum Tab { case device, photos }
+enum Tab { case device, photos, tools }
 
 enum Filter: String, CaseIterable, Identifiable {
     case all = "All Items", photos = "Photos", videos = "Videos", live = "Live Photos"
     var id: String { rawValue }
     var symbol: String {
         switch self {
-        case .all: return "photo.on.rectangle.angled"
+        case .all: return "photo.on.rectangle"
         case .photos: return "photo"
         case .videos: return "video"
         case .live: return "livephoto"
@@ -36,7 +36,13 @@ enum Filter: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - Root: custom top bar with tabs, then the Device dashboard or the Photos pane
+// Semantic colours, toned to sit inside the neutral ramp.
+enum Tone {
+    static let ready = Color(red: 0.30, green: 0.76, blue: 0.54)
+    static let warning = Color(red: 0.93, green: 0.68, blue: 0.26)
+}
+
+// MARK: - Root: top bar with tabs, then the Device dashboard or the Photos pane
 
 struct RootView: View {
     @EnvironmentObject var manager: DeviceManager
@@ -46,7 +52,7 @@ struct RootView: View {
     @AppStorage("skipExisting") private var skipExisting = true
     @AppStorage("deleteAfterCopy") private var deleteAfterCopy = false
     @AppStorage("thumbSize") private var thumbSize = 132.0
-    @State private var tab: Tab = ProcessInfo.processInfo.environment["DECANT_TAB"] == "photos" ? .photos : .device   // screenshot aid
+    @State private var tab: Tab = ["photos": Tab.photos, "tools": .tools][ProcessInfo.processInfo.environment["DECANT_TAB"] ?? ""] ?? .device   // screenshot aid
     @State private var filter: Filter? = .all
     @State private var confirmDelete = false
     @State private var spaceWarning: String?
@@ -66,6 +72,8 @@ struct RootView: View {
                 PhotosPane(filter: $filter, thumbSize: $thumbSize, byDate: $byDate, skipExisting: $skipExisting,
                            deleteAfterCopy: $deleteAfterCopy, destURL: destURL, chooseFolder: chooseFolder,
                            showLog: { openWindow(id: "log") }, start: { begin(delete: deleteAfterCopy) })
+            case .tools:
+                ToolsPane(showLog: { openWindow(id: "log") })
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -73,7 +81,7 @@ struct RootView: View {
             Button("Copy and Delete", role: .destructive) { start(delete: true) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("\(manager.selection.count) items will be removed from the iPhone after each copy is verified. The iPhone may keep them in Recently Deleted for 30 days.")
+            Text("\(manager.selection.count.formatted()) items will be removed from the iPhone after each copy is verified. The iPhone may keep them in Recently Deleted for 30 days.")
         }
         .alert("Not enough space", isPresented: Binding(get: { spaceWarning != nil }, set: { if !$0 { spaceWarning = nil } })) {
             Button("OK") {}
@@ -85,44 +93,42 @@ struct RootView: View {
 
     private var header: some View {
         HStack(spacing: 0) {
-            Color.clear.frame(width: 78)                       // room for the traffic lights
-            HStack(spacing: 8) {
-                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 26, height: 26)
-                Text("Decant").font(.title3.weight(.semibold))
-            }
+            Color.clear.frame(width: 80)                       // room for the traffic lights
+            Text("Decant").font(.system(size: 16, weight: .medium))
             Spacer()
             HStack(spacing: 4) {
                 TabButton(title: "Device", symbol: "iphone", selected: tab == .device) { tab = .device }
                     .keyboardShortcut("1", modifiers: .command)
-                TabButton(title: "Photos", symbol: "photo.on.rectangle.angled", selected: tab == .photos) { tab = .photos }
+                TabButton(title: "Photos", symbol: "photo.on.rectangle", selected: tab == .photos) { tab = .photos }
                     .keyboardShortcut("2", modifiers: .command)
+                TabButton(title: "Tools", symbol: "wrench.and.screwdriver", selected: tab == .tools) { tab = .tools }
+                    .keyboardShortcut("3", modifiers: .command)
             }
             Spacer()
             deviceChip
         }
-        .padding(.horizontal, 14)
-        .frame(height: 62)
+        .padding(.horizontal, 16)
+        .frame(height: 60)
         .background(.bar)
         .gesture(WindowDragGesture())
     }
 
     private var deviceChip: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 8) {
             Circle().fill(statusColor).frame(width: 7, height: 7)
-            Text(manager.device?.name ?? "No iPhone").font(.callout.weight(.medium))
+            Text(manager.device?.name ?? "No iPhone").font(.callout)
             if let level = manager.battery?.level {
-                Label("\(level)%", systemImage: level > 60 ? "battery.100percent" : level > 25 ? "battery.50percent" : "battery.25percent")
-                    .font(.callout).foregroundStyle(.secondary)
+                Text("\(level)%").font(.callout).foregroundStyle(.secondary).monospacedDigit()
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 7)
-        .background(.quinary, in: Capsule())
+        .padding(.horizontal, 12).frame(height: 32)
+        .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var statusColor: Color {
-        if manager.device == nil { return .gray }
-        if manager.locked { return .orange }
-        return manager.catalogComplete ? .green : .yellow
+        if manager.device == nil { return Color(nsColor: .tertiaryLabelColor) }
+        if manager.locked { return Tone.warning }
+        return manager.catalogComplete ? Tone.ready : Tone.warning
     }
 
     // MARK: Actions
@@ -190,29 +196,31 @@ struct TabButton: View {
     let title: String, symbol: String, selected: Bool, action: () -> Void
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: symbol).font(.system(size: 19))
+            VStack(spacing: 4) {
+                Image(systemName: symbol).font(.system(size: 17))
                 Text(title).font(.caption)
             }
-            .frame(width: 82, height: 48)
-            .foregroundStyle(selected ? Color.accentColor : .secondary)
-            .background(selected ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 8))
+            .frame(width: 80, height: 44)
+            .foregroundStyle(selected ? .primary : .secondary)
+            .background(selected ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
     }
 }
 
-// MARK: - Device dashboard (3uTools-style)
+// MARK: - Cards
 
 struct Card<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
         content
-            .padding(18)
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
+            .padding(20)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
     }
 }
+
+// MARK: - Device dashboard
 
 struct DeviceDashboard: View {
     @EnvironmentObject var manager: DeviceManager
@@ -222,42 +230,32 @@ struct DeviceDashboard: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 18) {
-                HStack(alignment: .top, spacing: 18) {
-                    phoneCard.frame(width: 260)
-                    VStack(spacing: 18) {
+            VStack(spacing: 16) {
+                HStack(alignment: .top, spacing: 16) {
+                    phoneCard.frame(width: 272)
+                    VStack(spacing: 16) {
                         infoCard
                         storageCard
                     }
                 }
-                quickActions
+                photosRow
             }
-            .padding(20)
+            .padding(24)
         }
     }
 
     private var phoneCard: some View {
         Card {
-            VStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 30)
-                        .fill(LinearGradient(colors: [Color(white: 0.16), Color(white: 0.05)], startPoint: .top, endPoint: .bottom))
-                        .frame(width: 150, height: 310)
-                        .overlay(RoundedRectangle(cornerRadius: 30).strokeBorder(Color(white: 0.35), lineWidth: 1.5))
-                    RoundedRectangle(cornerRadius: 24)
-                        .fill(LinearGradient(colors: [Color.accentColor.opacity(0.9), Color.purple.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 136, height: 296)
-                        .opacity(manager.device == nil ? 0.25 : 1)
-                    Capsule().fill(.black).frame(width: 46, height: 13).offset(y: -133)
-                    Image(systemName: manager.device == nil ? "cable.connector" : "photo.on.rectangle.angled")
-                        .font(.system(size: 44, weight: .light)).foregroundStyle(.white.opacity(0.85))
-                }
-                .padding(.top, 4)
-                VStack(spacing: 3) {
-                    Text(manager.info?.marketingName ?? manager.device?.productKind ?? "No iPhone").font(.headline)
+            VStack(spacing: 16) {
+                PhoneView(style: PhoneStyle.style(for: manager.info?.model, name: manager.info?.marketingName),
+                          connected: manager.device != nil, screenItems: manager.screenItems)
+                    .padding(.top, 4)
+                VStack(spacing: 4) {
+                    Text(manager.info?.marketingName ?? manager.device?.productKind ?? "No iPhone")
+                        .font(.system(size: 15, weight: .medium))
                     Text(manager.statusText).font(.caption).foregroundStyle(.secondary)
                 }
-                HStack {
+                HStack(spacing: 8) {
                     Button("Refresh") { manager.refresh() }.disabled(manager.device == nil || manager.running)
                     Button("Log", action: showLog)
                 }
@@ -269,65 +267,73 @@ struct DeviceDashboard: View {
 
     private var infoCard: some View {
         Card {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(manager.info?.marketingName ?? manager.device?.name ?? "No iPhone connected")
-                        .font(.title2.weight(.semibold))
+                        .font(.system(size: 22, weight: .medium))
                     if let s = manager.storage {
-                        Text(Self.capacityLabel(s.capacity))
-                            .font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
-                            .padding(.horizontal, 7).padding(.vertical, 3)
-                            .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 5))
+                        Text(Self.capacityLabel(s.capacity)).font(.callout).foregroundStyle(.secondary).monospacedDigit()
                     }
                     Spacer()
                 }
-                Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 0) {
-                    GridRow { row("Device Name", manager.device?.name); row("Battery", batteryText) }
-                    GridRow { row("iOS Version", manager.info?.version); row("Battery Health", healthText) }
-                    GridRow { row("Model", modelText); row("Capacity", manager.storage.map { Self.capacityLabel($0.capacity) }) }
-                    GridRow { row("Model Number", blank(manager.info?.modelNumber)); row("Region", blank(manager.info?.region)) }
-                    GridRow { serialRow; row("Manufacturer", blank(manager.info?.manufacturer)) }
-                    GridRow { row("Connection", manager.device == nil ? nil : "USB"); row("Status", manager.device == nil ? nil : manager.statusText) }
+                Grid(alignment: .leading, horizontalSpacing: 32, verticalSpacing: 0) {
+                    GridRow { row("Device name", manager.device?.name); row("Battery", batteryText) }
+                    GridRow { row("iOS version", blank(manager.info?.version)); row("Battery health", healthText) }
+                    GridRow { row("Model", blank(manager.info?.model)); row("Model number", modelNumber) }
+                    GridRow { serialRow; row("Region", blank(manager.info?.region)) }
+                    GridRow { row("Connection", manager.device == nil ? nil : "USB"); row("Status", manager.device == nil ? nil : manager.statusWord) }
                     GridRow { row("Photos", num(manager.photoCount)); row("Videos", num(manager.videoCount)) }
-                    GridRow { row("Live Photos", num(manager.liveCount)); row("Camera Roll", manager.device == nil ? nil : DeviceManager.gb(manager.totalBytes)) }
+                    GridRow { row("Live Photos", num(manager.liveCount)); row("Camera roll", manager.device == nil ? nil : DeviceManager.gb(manager.totalBytes)) }
                 }
                 if manager.device != nil && !Lockdown.available {
-                    Text("Install libimobiledevice (brew install libimobiledevice) for iOS version, serial, battery health and storage.")
-                        .font(.caption).foregroundStyle(.secondary).padding(.top, 4)
+                    Text("Install libimobiledevice (brew install libimobiledevice) for iOS version, serial, battery health and storage")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
     }
 
     private func blank(_ s: String?) -> String? { (s?.isEmpty ?? true) ? nil : s }
+    private func num(_ n: Int) -> String? { manager.device == nil ? nil : n.formatted() }
 
-    private var modelText: String? {
-        guard let i = manager.info, !i.model.isEmpty else { return nil }
-        return i.marketingName == i.model ? i.model : "\(i.marketingName) (\(i.model))"
+    private var modelNumber: String? {
+        guard let i = manager.info, !i.modelNumber.isEmpty else { return nil }
+        return i.modelNumber + i.region            // MU6C3 + LL/A, as printed on the box
     }
 
     private var batteryText: String? {
         guard let b = manager.battery, let level = b.level else { return nil }
-        return "\(level)%" + (b.charging == true ? " · charging" : "")
+        return "\(level)%" + (b.charging == true ? ", charging" : "")
     }
 
     private var healthText: String? {
         guard let b = manager.battery else { return nil }
         var parts: [String] = []
-        if let h = b.health { parts.append(String(format: "%.0f%% max capacity", h)) }
-        if let c = b.cycleCount { parts.append("\(c) cycles") }
+        if let h = b.health { parts.append(String(format: "%.0f%%", h)) }
+        if let c = b.cycleCount { parts.append("\(c.formatted()) cycles") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func row(_ label: String, _ value: String?) -> some View {
+        HStack(spacing: 8) {
+            Text(label).foregroundStyle(.secondary).frame(width: 112, alignment: .leading)
+            Text(value ?? "–").fontWeight(.medium).monospacedDigit().lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 13))
+        .frame(height: 32)
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     // Serial number stays masked until the eye is clicked (screenshots, screen sharing).
     private var serialRow: some View {
         HStack(spacing: 8) {
-            Text("Serial Number").foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+            Text("Serial number").foregroundStyle(.secondary).frame(width: 112, alignment: .leading)
             if let serial = blank(manager.info?.serial) {
                 Text(revealSerial ? serial : String(repeating: "•", count: serial.count))
                     .fontWeight(.medium).monospaced().lineLimit(1)
                 Button { revealSerial.toggle() } label: {
-                    Image(systemName: revealSerial ? "eye.slash" : "eye").foregroundStyle(.secondary)
+                    Image(systemName: revealSerial ? "eye.slash" : "eye").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless).help(revealSerial ? "Hide serial number" : "Show serial number")
             } else {
@@ -335,33 +341,20 @@ struct DeviceDashboard: View {
             }
             Spacer(minLength: 0)
         }
-        .font(.callout)
-        .frame(height: 32)
-        .overlay(alignment: .bottom) { Divider() }
-    }
-
-    private func num(_ n: Int) -> String? { manager.device == nil ? nil : n.formatted() }
-
-    private func row(_ label: String, _ value: String?) -> some View {
-        HStack(spacing: 8) {
-            Text(label).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
-            Text(value ?? "–").fontWeight(.medium).lineLimit(1).truncationMode(.middle)
-            Spacer(minLength: 0)
-        }
-        .font(.callout)
+        .font(.system(size: 13))
         .frame(height: 32)
         .overlay(alignment: .bottom) { Divider() }
     }
 
     private var storageCard: some View {
         Card {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("Storage").font(.headline)
+                    Text("Storage").font(.system(size: 15, weight: .medium))
                     Spacer()
                     if let s = manager.storage {
                         Text("\(DeviceManager.gb(s.capacity - s.free)) used of \(DeviceManager.gb(s.capacity))")
-                            .font(.callout).foregroundStyle(.secondary)
+                            .font(.callout).foregroundStyle(.secondary).monospacedDigit()
                     } else if manager.device != nil {
                         Text("Camera roll \(DeviceManager.gb(manager.totalBytes))").font(.callout).foregroundStyle(.secondary)
                     }
@@ -371,34 +364,32 @@ struct DeviceDashboard: View {
                 let free = Double(manager.storage?.free ?? 0)
                 let other = max(cap - free - photos, 0)
                 GeometryReader { g in
-                    HStack(spacing: 1) {
+                    HStack(spacing: 2) {
                         if cap > 0 {
-                            Rectangle().fill(Color.accentColor).frame(width: g.size.width * photos / cap)
-                            Rectangle().fill(Color.purple.opacity(0.75)).frame(width: g.size.width * other / cap)
-                            Rectangle().fill(Color(nsColor: .quaternaryLabelColor))
-                        } else {
-                            Rectangle().fill(Color(nsColor: .quaternaryLabelColor))
+                            Rectangle().fill(Color.accentColor).frame(width: max(g.size.width * photos / cap, 2))
+                            Rectangle().fill(Color(nsColor: .tertiaryLabelColor)).frame(width: g.size.width * other / cap)
                         }
+                        Rectangle().fill(.quaternary)
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
-                .frame(height: 14)
-                HStack(spacing: 18) {
-                    legend(Color.accentColor, "Photos & Videos", manager.device == nil ? nil : (manager.storage?.photos ?? manager.totalBytes))
-                    legend(Color.purple.opacity(0.75), "Other", cap > 0 ? Int(other) : nil)
+                .frame(height: 12)
+                HStack(spacing: 20) {
+                    legend(Color.accentColor, "Photos & videos", manager.device == nil ? nil : (manager.storage?.photos ?? manager.totalBytes))
+                    legend(Color(nsColor: .tertiaryLabelColor), "Other", cap > 0 ? Int(other) : nil)
                     legend(Color(nsColor: .quaternaryLabelColor), "Free", cap > 0 ? Int(free) : nil)
                     Spacer()
                 }
-                .font(.caption)
+                .font(.system(size: 12))
             }
         }
     }
 
     private func legend(_ color: Color, _ label: String, _ bytes: Int?) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 6) {
             Circle().fill(color).frame(width: 8, height: 8)
             Text(label).foregroundStyle(.secondary)
-            Text(bytes.map(DeviceManager.gb) ?? "–").fontWeight(.medium)
+            Text(bytes.map(DeviceManager.gb) ?? "–").monospacedDigit()
         }
     }
 
@@ -407,43 +398,197 @@ struct DeviceDashboard: View {
         let gb = Double(bytes) / 1e9
         let tiers: [Double] = [64, 128, 256, 512, 1024, 2048]
         let t = tiers.min { abs($0 - gb) < abs($1 - gb) } ?? gb
-        return t >= 1024 ? "\(Int(t / 1024))TB" : "\(Int(t))GB"
+        return t >= 1024 ? "\(Int(t / 1024)) TB" : "\(Int(t)) GB"
     }
 
-    private var quickActions: some View {
-        HStack(spacing: 12) {
-            ActionTile(title: "Copy to Mac", symbol: "arrow.down.doc", tint: .accentColor, action: copy)
-            ActionTile(title: "Move to Mac", symbol: "arrow.down.doc.fill", tint: .red, action: move)
-            ActionTile(title: destURL == nil ? "Choose Folder" : "Open Folder", symbol: "folder", tint: .orange,
-                       subtitle: destURL?.lastPathComponent) {
-                if let url = destURL { NSWorkspace.shared.activateFileViewerSelecting([url]) } else { chooseFolder() }
+    // Where photos go, and the two photo actions. The primary action is the only accent on the screen.
+    private var photosRow: some View {
+        HStack(spacing: 8) {
+            Text("Photos go to").font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 112, alignment: .leading)
+            if let url = destURL {
+                Text(Self.shortPath(url)).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
+                Button("Change…", action: chooseFolder).buttonStyle(.link)
+                Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }.buttonStyle(.link)
+                if let free = DeviceManager.freeSpace(at: url) {
+                    Text("\(DeviceManager.gb(free)) free").font(.system(size: 13)).foregroundStyle(.secondary).monospacedDigit()
+                }
+            } else {
+                Button("Choose a folder…", action: chooseFolder).buttonStyle(.link)
             }
-            ActionTile(title: "Re-read iPhone", symbol: "arrow.clockwise", tint: .teal) { manager.refresh() }
-            ActionTile(title: "Show Log", symbol: "doc.text", tint: .gray, action: showLog)
+            Spacer()
+            Button("Move to Mac…", action: move)
+            Button("Copy to Mac", action: copy).buttonStyle(.borderedProminent)
         }
+        .controlSize(.large)
         .disabled(manager.running)
+    }
+
+    static func shortPath(_ url: URL) -> String {
+        let parts = url.pathComponents.filter { $0 != "/" && $0 != "Volumes" && $0 != "Users" }
+        return parts.suffix(3).joined(separator: " › ")
     }
 }
 
-struct ActionTile: View {
-    let title: String, symbol: String, tint: Color
-    var subtitle: String? = nil
-    let action: () -> Void
-    @State private var hovering = false
+// MARK: - Tools: device actions, one row each, grouped
+
+struct ToolsPane: View {
+    @EnvironmentObject var manager: DeviceManager
+    @State private var confirmRestart = false
+    @State private var confirmShutDown = false
+    @State private var renaming = false
+    @State private var newName = ""
+    let showLog: () -> Void
+
+    private var enabled: Bool { manager.device != nil && !manager.running && Lockdown.available }
+
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: symbol).font(.system(size: 24)).foregroundStyle(tint).frame(height: 28)
-                Text(title).font(.callout)
-                if let subtitle { Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                group("Power") {
+                    toolRow("Restart", "Reboots the iPhone. It reconnects by itself afterwards.", "arrow.counterclockwise") {
+                        Button("Restart…") { confirmRestart = true }
+                    }
+                    toolRow("Shut down", "Turns the iPhone off. Press its side button to turn it on again.", "power", last: true) {
+                        Button("Shut Down…") { confirmShutDown = true }
+                    }
+                }
+                group("Device") {
+                    toolRow("Rename", "Changes the name shown in Finder, AirDrop and on the phone.", "pencil") {
+                        Button("Rename…") { newName = manager.device?.name ?? ""; renaming = true }
+                    }
+                    toolRow("Re-read library", "Reads the camera roll again after changes on the phone.", "arrow.clockwise") {
+                        Button("Re-read") { manager.refresh() }.disabled(manager.device == nil || manager.running)
+                    }
+                    toolRow("Log", "Everything Decant did this session, with times.", "doc.text", last: true) {
+                        Button("Show Log", action: showLog)
+                    }
+                }
+                if manager.device != nil && !Lockdown.available {
+                    Text("Power and rename need libimobiledevice: brew install libimobiledevice")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
-            .frame(maxWidth: .infinity).frame(height: 84)
-            .background(hovering ? Color(nsColor: .controlBackgroundColor) : Color(nsColor: .controlBackgroundColor).opacity(0.6),
-                        in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
+            .padding(24)
+            .frame(maxWidth: 760, alignment: .leading)
         }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .alert("Restart the iPhone?", isPresented: $confirmRestart) {
+            Button("Restart", role: .destructive) { manager.restart() }
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("Shut down the iPhone?", isPresented: $confirmShutDown) {
+            Button("Shut Down", role: .destructive) { manager.shutDown() }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("You will need to press its side button to turn it on again.") }
+        .alert("Rename iPhone", isPresented: $renaming) {
+            TextField("Name", text: $newName)
+            Button("Rename") { manager.rename(newName.trimmingCharacters(in: .whitespaces)) }
+                .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    private func group<Content: View>(_ title: String, @ViewBuilder _ rows: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 13)).foregroundStyle(.secondary)
+            Card { VStack(spacing: 0, content: rows).padding(-8) }
+        }
+    }
+
+    private func toolRow<Action: View>(_ title: String, _ detail: String, _ symbol: String, last: Bool = false, @ViewBuilder action: () -> Action) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol).font(.system(size: 16)).foregroundStyle(.secondary).frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 13, weight: .medium))
+                Text(detail).font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            action().disabled(!enabled)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 56)
+        .overlay(alignment: .bottom) { if !last { Divider().padding(.leading, 44) } }
+    }
+}
+
+// MARK: - Phone render: shape follows the connected model, the screen shows the camera roll
+
+struct PhoneView: View {
+    let style: PhoneStyle
+    let connected: Bool
+    let screenItems: [MediaItem]
+
+    var body: some View {
+        let w = style.fold ? style.width * 1.5 : style.width
+        let h = style.height
+        let screenInset = EdgeInsets(top: style.homeButton ? 40 : style.bezel, leading: style.bezel,
+                                     bottom: style.homeButton ? 40 : style.bezel, trailing: style.bezel)
+        ZStack {
+            // Body: one neutral with a slight tone shift, a hairline rim for the metal edge.
+            RoundedRectangle(cornerRadius: style.corner)
+                .fill(LinearGradient(colors: [Color(white: 0.20), Color(white: 0.09)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay(RoundedRectangle(cornerRadius: style.corner).strokeBorder(Color(white: 1, opacity: 0.16), lineWidth: 1))
+                .shadow(color: .black.opacity(0.35), radius: 14, y: 8)
+            // Screen
+            screen
+                .clipShape(RoundedRectangle(cornerRadius: max(style.corner - style.bezel, 4)))
+                .padding(screenInset)
+            if style.fold {
+                Rectangle().fill(Color(white: 1, opacity: 0.10)).frame(width: 1).padding(.vertical, style.bezel)
+            }
+            // Cutout
+            VStack {
+                switch style.cutout {
+                case .island: Capsule().fill(.black).frame(width: w * 0.30, height: 11).padding(.top, style.bezel + 8)
+                case .notch: UnevenRoundedRectangle(bottomLeadingRadius: 10, bottomTrailingRadius: 10).fill(.black).frame(width: w * 0.46, height: 16).padding(.top, style.bezel)
+                case .none: EmptyView()
+                }
+                Spacer()
+                if style.homeButton {
+                    Circle().strokeBorder(Color(white: 1, opacity: 0.25), lineWidth: 1.5).frame(width: 26, height: 26).padding(.bottom, 7)
+                }
+            }
+        }
+        .frame(width: w, height: h)
+        .opacity(connected ? 1 : 0.55)
+    }
+
+    @ViewBuilder private var screen: some View {
+        let thumbs = screenItems.filter { $0.thumbnail != nil }
+        if connected && thumbs.count >= 3 {
+            // The camera roll itself, three across, newest first.
+            let cols = Array(repeating: GridItem(.flexible(), spacing: 1), count: 3)
+            GeometryReader { g in
+                let side = (g.size.width - 2) / 3
+                LazyVGrid(columns: cols, spacing: 1) {
+                    ForEach(thumbs.prefix(12)) { item in
+                        ScreenThumb(item: item).frame(width: side, height: side).clipped()
+                    }
+                }
+                .frame(width: g.size.width, height: g.size.height, alignment: .top)
+                .background(.black)
+            }
+        } else {
+            // Dark glass with one soft reflection.
+            ZStack {
+                LinearGradient(colors: [Color(white: 0.13), Color(white: 0.05)], startPoint: .top, endPoint: .bottom)
+                LinearGradient(colors: [Color(white: 1, opacity: 0.07), .clear, .clear], startPoint: .topLeading, endPoint: .bottomTrailing)
+                if !connected {
+                    Image(systemName: "cable.connector").font(.system(size: 28, weight: .light)).foregroundStyle(Color(white: 0.45))
+                }
+            }
+        }
+    }
+}
+
+struct ScreenThumb: View {
+    @ObservedObject var item: MediaItem
+    var body: some View {
+        if let t = item.thumbnail {
+            Image(decorative: t, scale: 1).resizable().aspectRatio(contentMode: .fill)
+        } else {
+            Color(white: 0.1)
+        }
     }
 }
 
@@ -496,7 +641,7 @@ struct PhotosPane: View {
                 }
             }
             .listStyle(.sidebar)
-            .frame(width: 210)
+            .frame(width: 220)
             Divider()
             VStack(spacing: 0) {
                 gridToolbar
@@ -511,9 +656,9 @@ struct PhotosPane: View {
     private var gridToolbar: some View {
         HStack(spacing: 12) {
             Text("\(shown.count.formatted()) items · \(manager.selection.count.formatted()) selected")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(.secondary).monospacedDigit()
             Spacer()
-            Slider(value: $thumbSize, in: 80...220).frame(width: 110).help("Thumbnail size")
+            Slider(value: $thumbSize, in: 80...220).frame(width: 112).help("Thumbnail size")
             Button("Select All") { manager.selection.formUnion(shown.map { $0.id }) }.disabled(shown.isEmpty)
                 .keyboardShortcut("a", modifiers: .command)
             Button("Select None") { manager.selection.subtract(shown.map { $0.id }) }.disabled(manager.selection.isEmpty)
@@ -528,15 +673,15 @@ struct PhotosPane: View {
         .controlSize(.small)
         .disabled(manager.running)
         .padding(.horizontal, 12)
-        .frame(height: 38)
+        .frame(height: 40)
     }
 
     private var grid: some View {
         Group {
             if manager.items.isEmpty {
-                VStack(spacing: 10) {
+                VStack(spacing: 12) {
                     Image(systemName: manager.locked ? "lock.iphone" : "iphone.and.arrow.forward")
-                        .font(.system(size: 52, weight: .light)).foregroundStyle(.tertiary)
+                        .font(.system(size: 48, weight: .light)).foregroundStyle(.tertiary)
                     Text(manager.statusText).foregroundStyle(.secondary)
                     if manager.device != nil && !manager.catalogComplete && !manager.locked { ProgressView().controlSize(.small) }
                 }
@@ -561,19 +706,19 @@ struct PhotosPane: View {
     }
 
     private var bottomBar: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 16) {
             if manager.running {
                 ProgressView(value: manager.progress.fraction).frame(maxWidth: 320)
                 Text(progressText).font(.callout).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
                 Spacer()
                 Button("Stop") { manager.cancel() }
             } else {
-                Text("Import to:").foregroundStyle(.secondary)
+                Text("Import to").foregroundStyle(.secondary)
                 Button(action: chooseFolder) {
                     Label(destURL?.lastPathComponent ?? "Choose Folder…", systemImage: "folder")
                 }
                 if let url = destURL, let free = DeviceManager.freeSpace(at: url) {
-                    Text("\(DeviceManager.gb(free)) free").font(.callout).foregroundStyle(.secondary)
+                    Text("\(DeviceManager.gb(free)) free").font(.callout).foregroundStyle(.secondary).monospacedDigit()
                 }
                 if let summary = manager.summary {
                     Divider().frame(height: 16)
@@ -589,12 +734,11 @@ struct PhotosPane: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
-                .tint(deleteAfterCopy ? .red : .accentColor)
                 .disabled(manager.device == nil || !manager.catalogComplete || manager.selection.isEmpty)
             }
         }
-        .padding(.horizontal, 14)
-        .frame(height: 50)
+        .padding(.horizontal, 16)
+        .frame(height: 52)
         .background(.bar)
     }
 
@@ -606,7 +750,7 @@ struct PhotosPane: View {
 
     private var progressText: String {
         let p = manager.progress
-        return "\(p.phase) \(p.done) of \(p.total) · \(DeviceManager.gb(p.bytesDone)) of \(DeviceManager.gb(p.bytesTotal))"
+        return "\(p.phase) \(p.done.formatted()) of \(p.total.formatted()) · \(DeviceManager.gb(p.bytesDone)) of \(DeviceManager.gb(p.bytesTotal))"
     }
 }
 
@@ -624,7 +768,7 @@ struct ThumbCell: View {
                 if let t = item.thumbnail {
                     Image(decorative: t, scale: 1).resizable().aspectRatio(contentMode: .fill)
                 } else {
-                    Rectangle().fill(Color(nsColor: .quaternaryLabelColor))
+                    Rectangle().fill(.quaternary)
                 }
             }
             .frame(width: size, height: size).clipped()
@@ -632,9 +776,9 @@ struct ThumbCell: View {
             VStack {
                 HStack {
                     if item.isLivePhoto {
-                        Label("LIVE", systemImage: "livephoto").labelStyle(.titleAndIcon)
-                            .font(.system(size: 9, weight: .semibold)).padding(.horizontal, 5).padding(.vertical, 2)
-                            .background(.ultraThinMaterial, in: Capsule())
+                        Label("Live", systemImage: "livephoto").labelStyle(.titleAndIcon)
+                            .font(.system(size: 10, weight: .medium)).padding(.horizontal, 6).frame(height: 18)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
                     }
                     Spacer()
                     if selected {
@@ -648,13 +792,13 @@ struct ThumbCell: View {
                 HStack {
                     Spacer()
                     if item.isVideo {
-                        Text(Self.clock(item.duration)).font(.system(size: 10, weight: .medium)).foregroundStyle(.white)
+                        Text(Self.clock(item.duration)).font(.system(size: 11, weight: .medium)).monospacedDigit().foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.8), radius: 2)
                     }
                     statusBadge
                 }
             }
-            .padding(5)
+            .padding(6)
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: 4))
@@ -670,11 +814,11 @@ struct ThumbCell: View {
         case .pending: EmptyView()
         case .copying: ProgressView().controlSize(.mini)
         case .verified, .alreadyCopied:
-            Image(systemName: "checkmark.circle.fill").symbolRenderingMode(.palette).foregroundStyle(.white, .green)
+            Image(systemName: "checkmark.circle.fill").symbolRenderingMode(.palette).foregroundStyle(.white, Tone.ready)
         case .deleted:
             Image(systemName: "trash.circle.fill").symbolRenderingMode(.palette).foregroundStyle(.white, .gray)
         case .failed:
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow).shadow(radius: 1)
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Tone.warning).shadow(radius: 1)
         }
     }
 
