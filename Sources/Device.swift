@@ -53,7 +53,65 @@ struct OffloadOptions {
     var deleteAfterCopy: Bool
 }
 
+struct DeviceInfo {
+    var manufacturer = "", model = "", version = "", serial = ""
+    var modelNumber = "", region = "", udid = "", hardware = ""
+    var marketingName: String { DeviceInfo.names[model] ?? model }
+    static let names: [String: String] = [
+        "iPhone12,1": "iPhone 11", "iPhone12,3": "iPhone 11 Pro", "iPhone12,5": "iPhone 11 Pro Max", "iPhone12,8": "iPhone SE (2nd gen)",
+        "iPhone13,1": "iPhone 12 mini", "iPhone13,2": "iPhone 12", "iPhone13,3": "iPhone 12 Pro", "iPhone13,4": "iPhone 12 Pro Max",
+        "iPhone14,4": "iPhone 13 mini", "iPhone14,5": "iPhone 13", "iPhone14,2": "iPhone 13 Pro", "iPhone14,3": "iPhone 13 Pro Max",
+        "iPhone14,6": "iPhone SE (3rd gen)", "iPhone14,7": "iPhone 14", "iPhone14,8": "iPhone 14 Plus",
+        "iPhone15,2": "iPhone 14 Pro", "iPhone15,3": "iPhone 14 Pro Max", "iPhone15,4": "iPhone 15", "iPhone15,5": "iPhone 15 Plus",
+        "iPhone16,1": "iPhone 15 Pro", "iPhone16,2": "iPhone 15 Pro Max", "iPhone17,3": "iPhone 16", "iPhone17,4": "iPhone 16 Plus",
+        "iPhone17,1": "iPhone 16 Pro", "iPhone17,2": "iPhone 16 Pro Max", "iPhone17,5": "iPhone 16e", "iPhone18,3": "iPhone 17",
+    ]
+}
+
+struct DeviceStorage { var capacity: Int; var free: Int; var photos: Int? = nil; var apps: Int? = nil }
+
+struct BatteryInfo {
+    var level: Int?, charging: Bool?
+    var cycleCount: Int?, designCapacity: Int?, maxCapacity: Int?
+    var health: Double? {
+        guard let d = designCapacity, let m = maxCapacity, d > 0 else { return nil }
+        return Double(m) / Double(d) * 100
+    }
+}
+
+/// libimobiledevice (Homebrew) speaks Apple's lockdown service: the same details 3uTools shows.
+enum Lockdown {
+    static let available = tool("ideviceinfo") != nil
+
+    static func tool(_ name: String) -> String? {
+        ["/opt/homebrew/bin", "/usr/local/bin"].map { "\($0)/\(name)" }.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    static func run(_ name: String, _ args: [String]) -> Data? {
+        guard let path = tool(name) else { return nil }
+        let p = Process(); p.executableURL = URL(fileURLWithPath: path); p.arguments = args
+        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+        do { try p.run() } catch { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return p.terminationStatus == 0 ? data : nil
+    }
+
+    static func plist(_ name: String, _ args: [String]) -> [String: Any]? {
+        guard let d = run(name, args), !d.isEmpty else { return nil }
+        return (try? PropertyListSerialization.propertyList(from: d, format: nil)) as? [String: Any]
+    }
+
+    static func firstUDID() -> String? {
+        run("idevice_id", ["-l"]).flatMap { String(data: $0, encoding: .utf8) }?
+            .split(whereSeparator: \.isNewline).first.map(String.init)
+    }
+}
+
 final class DeviceManager: NSObject, ObservableObject {
+    @Published var info: DeviceInfo?
+    @Published var storage: DeviceStorage?
+    @Published var battery: BatteryInfo?
     @Published var device: ICCameraDevice?
     @Published var items: [MediaItem] = []
     @Published var selection: Set<String> = []
@@ -86,7 +144,7 @@ final class DeviceManager: NSObject, ObservableObject {
 
     var statusText: String {
         guard device != nil else { return "No iPhone connected" }
-        if locked { return "Unlock the iPhone and tap Trust" }
+        if locked { return "Locked: unlock and tap Trust" }
         if !sessionOpen { return "Connecting…" }
         if !catalogComplete { return "Reading library… \(items.count) items" }
         return "Ready"
@@ -104,6 +162,7 @@ final class DeviceManager: NSObject, ObservableObject {
     func disconnect() {
         if let d = device, d.hasOpenSession { d.requestCloseSession() }
         device = nil
+        info = nil; storage = nil; battery = nil
         items = []; byFile = [:]; pendingAdds = []
         selection = []
         catalogComplete = false; sessionOpen = false; locked = false
@@ -235,10 +294,124 @@ final class DeviceManager: NSObject, ObservableObject {
         return deleted
     }
 
+    // MARK: Raw PTP (device details)
+
+    private func ptp(_ camera: ICCameraDevice, code: UInt16, params: [UInt32] = []) async -> Data? {
+        var cmd = Data()
+        func put32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { cmd.append(contentsOf: $0) } }
+        func put16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { cmd.append(contentsOf: $0) } }
+        put32(UInt32(12 + 4 * params.count)); put16(1); put16(code); put32(1)
+        params.forEach(put32)
+        return await withCheckedContinuation { cont in
+            camera.requestSendPTPCommand(cmd, outData: nil) { response, data, error in
+                DispatchQueue.main.async {
+                    guard error == nil, response.count >= 8,
+                          response.withUnsafeBytes({ $0.loadUnaligned(fromByteOffset: 6, as: UInt16.self) }) == 0x2001 else {
+                        cont.resume(returning: nil); return
+                    }
+                    var d = data
+                    // Some stacks hand back the data container (12-byte header) rather than the bare dataset.
+                    if d.count >= 12, d.withUnsafeBytes({ $0.loadUnaligned(as: UInt32.self) }) == UInt32(d.count),
+                       d.withUnsafeBytes({ $0.loadUnaligned(fromByteOffset: 4, as: UInt16.self) }) == 2 {
+                        d = d.subdata(in: 12..<d.count)
+                    }
+                    cont.resume(returning: d)
+                }
+            }
+        }
+    }
+
+    private struct PTPReader {
+        let d: Data; var i = 0
+        init(_ d: Data) { self.d = d }
+        mutating func u16() -> UInt16 { defer { i += 2 }; return i + 2 <= d.count ? d.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: i, as: UInt16.self) } : 0 }
+        mutating func u32() -> UInt32 { defer { i += 4 }; return i + 4 <= d.count ? d.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: i, as: UInt32.self) } : 0 }
+        mutating func u64() -> UInt64 { defer { i += 8 }; return i + 8 <= d.count ? d.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: i, as: UInt64.self) } : 0 }
+        mutating func string() -> String {   // u8 char count (incl. terminator), UCS-2 chars
+            guard i < d.count else { return "" }
+            let n = Int(d[i]); i += 1
+            var units: [UInt16] = []
+            for _ in 0..<n { units.append(u16()) }
+            return String(utf16CodeUnits: units, count: units.count).trimmingCharacters(in: CharacterSet(charactersIn: "\0"))
+        }
+        mutating func skipArray16() { let n = Int(u32()); i += 2 * n }
+    }
+
+    private func queryDetails(_ camera: ICCameraDevice) {
+        guard info == nil else { return }
+        if Lockdown.available { queryLockdown(); return }
+        Task { @MainActor in
+            if let d = await ptp(camera, code: 0x1001) {          // GetDeviceInfo
+                var r = PTPReader(d)
+                _ = r.u16(); _ = r.u32(); _ = r.u16(); _ = r.string(); _ = r.u16()
+                r.skipArray16(); r.skipArray16(); r.skipArray16(); r.skipArray16(); r.skipArray16()
+                var inf = DeviceInfo()
+                inf.manufacturer = r.string(); inf.model = r.string(); inf.version = r.string(); inf.serial = r.string()
+                if !inf.model.isEmpty { info = inf; addLog("\(inf.marketingName) (\(inf.model)), iOS \(inf.version)") }
+            }
+            if let ids = await ptp(camera, code: 0x1004) {        // GetStorageIDs
+                var r = PTPReader(ids)
+                let n = Int(r.u32())
+                if n > 0, let s = await ptp(camera, code: 0x1005, params: [r.u32()]) {   // GetStorageInfo
+                    var sr = PTPReader(s)
+                    _ = sr.u16(); _ = sr.u16(); _ = sr.u16()
+                    let cap = Int(sr.u64()), free = Int(sr.u64())
+                    if cap > 0 { storage = DeviceStorage(capacity: cap, free: free) }
+                }
+            }
+        }
+    }
+
+    // MARK: Lockdown (libimobiledevice)
+
+    private func queryLockdown() {
+        Task.detached(priority: .userInitiated) { [weak self] in
+            var args: [String] = []
+            if let udid = Lockdown.firstUDID() { args = ["-u", udid] }
+            let general = Lockdown.plist("ideviceinfo", args + ["-x"])
+            let batt = Lockdown.plist("ideviceinfo", args + ["-x", "-q", "com.apple.mobile.battery"])
+            let disk = Lockdown.plist("ideviceinfo", args + ["-x", "-q", "com.apple.disk_usage"])
+            let diag = Lockdown.plist("idevicediagnostics", args + ["ioregentry", "AppleSmartBattery"])
+            await MainActor.run {
+                guard let self else { return }
+                if let g = general {
+                    var inf = DeviceInfo()
+                    inf.manufacturer = "Apple"
+                    inf.model = g["ProductType"] as? String ?? ""
+                    inf.version = g["ProductVersion"] as? String ?? ""
+                    inf.serial = g["SerialNumber"] as? String ?? ""
+                    inf.modelNumber = g["ModelNumber"] as? String ?? ""
+                    inf.region = g["RegionInfo"] as? String ?? ""
+                    inf.udid = g["UniqueDeviceID"] as? String ?? ""
+                    inf.hardware = g["HardwareModel"] as? String ?? ""
+                    if !inf.model.isEmpty {
+                        self.info = inf
+                        self.addLog("\(inf.marketingName) (\(inf.model)), iOS \(inf.version)")
+                    }
+                } else {
+                    self.addLog("Could not read device details (is the iPhone paired with this Mac?)")
+                }
+                var b = BatteryInfo()
+                b.level = batt?["BatteryCurrentCapacity"] as? Int
+                b.charging = batt?["BatteryIsCharging"] as? Bool
+                let entry = (diag?["IORegistry"] as? [String: Any]) ?? diag ?? [:]
+                b.cycleCount = entry["CycleCount"] as? Int
+                b.designCapacity = entry["DesignCapacity"] as? Int
+                b.maxCapacity = (entry["NominalChargeCapacity"] as? Int) ?? (entry["AppleRawMaxCapacity"] as? Int)
+                if b.level != nil || b.cycleCount != nil { self.battery = b }
+                if let d = disk, let cap = d["TotalDiskCapacity"] as? Int, let free = d["TotalDataAvailable"] as? Int {
+                    self.storage = DeviceStorage(capacity: cap, free: free,
+                                                 photos: d["CameraUsage"] as? Int ?? d["PhotoUsage"] as? Int,
+                                                 apps: d["MobileApplicationUsage"] as? Int)
+                }
+            }
+        }
+    }
+
     // MARK: Helpers
 
     static func gb(_ bytes: Int) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+        bytes == 0 ? "0 KB" : ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 
     static func size(of url: URL) -> Int? {
@@ -296,7 +469,10 @@ extension DeviceManager: ICCameraDeviceDelegate {
             return
         }
         sessionOpen = true
-        if let c = device as? ICCameraDevice { locked = c.isAccessRestrictedAppleDevice }
+        if let c = device as? ICCameraDevice {
+            locked = c.isAccessRestrictedAppleDevice
+            queryDetails(c)
+        }
     }
 
     func device(_ device: ICDevice, didCloseSessionWithError error: Error?) {
@@ -335,6 +511,7 @@ extension DeviceManager: ICCameraDeviceDelegate {
 
     func deviceDidBecomeReady(withCompleteContentCatalog device: ICCameraDevice) {
         flushAdds()
+        if info == nil { queryDetails(device) }
         catalogComplete = true
         selection = Set(items.map { $0.id })
         addLog("Library read: \(photoCount) photos, \(videoCount) videos (\(liveCount) Live Photos), \(Self.gb(totalBytes))")
@@ -348,6 +525,8 @@ extension DeviceManager: ICCameraDeviceDelegate {
     func cameraDeviceDidRemoveAccessRestriction(_ device: ICDevice) {
         locked = false
         addLog("iPhone unlocked")
-        if let d = self.device, !d.hasOpenSession { d.requestOpenSession() }
+        if let d = self.device {
+            if d.hasOpenSession { queryDetails(d) } else { d.requestOpenSession() }
+        }
     }
 }

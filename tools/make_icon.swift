@@ -1,5 +1,5 @@
-// Renders the Offload app icon (blue gradient tile with the iPhone-and-arrow symbol) into an .iconset.
-// Usage: swift tools/make_icon.swift Offload.iconset
+// Renders the Decant app icon (blue gradient tile with the iPhone-and-arrow symbol) into an .iconset.
+// Usage: swift tools/make_icon.swift Decant.iconset
 import AppKit
 
 let outDir = CommandLine.arguments[1]
