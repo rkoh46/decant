@@ -483,40 +483,49 @@ struct DeviceDashboard: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
+    // Storage the way the iPhone's own Settings counts it: categories added up, with Settings' colours.
+    // Music, Messages, Mail and System Data are not readable over USB, so the total runs a little under Settings.
     private var storageCard: some View {
-        Card(fill: true) {
+        let s = manager.storage
+        let cap = Double(s?.capacity ?? 0)
+        let photos = Double(s?.photos ?? manager.totalBytes)
+        let system = Double(s?.system ?? 0)
+        let appSum = Double(apps.apps.reduce(0) { $0 + $1.totalSize })
+        let measured = appSum > 0
+        let used = measured ? appSum + photos + system : (cap > 0 ? cap - Double(s?.free ?? 0) : 0)
+        let free = max(cap - used, 0)
+        let segments: [(Color, String, Double)] = [
+            (Color(nsColor: .systemRed), "Applications", measured ? appSum : 0),
+            (Color(nsColor: .systemGreen), "Photos", photos),
+            (Color(nsColor: .systemGray), "iOS", system),
+        ]
+        return Card(fill: true) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text("Storage").font(.system(size: 15, weight: .medium))
                     Spacer()
-                    if let s = manager.storage {
-                        Text("\(DeviceManager.gb(s.capacity - s.free)) used of \(DeviceManager.gb(s.capacity))")
+                    if cap > 0 {
+                        Text("\(DeviceManager.gb(Int(used))) of \(Self.capacityLabel(Int(cap))) used" + (measured ? "" : " · measuring apps"))
                             .font(.callout).foregroundStyle(.secondary).monospacedDigit()
                     } else if manager.device != nil {
                         Text("Camera roll \(DeviceManager.gb(manager.totalBytes))").font(.callout).foregroundStyle(.secondary)
                     }
                 }
-                let photos = Double(manager.storage?.photos ?? manager.totalBytes)
-                let cap = Double(manager.storage?.capacity ?? 0)
-                let free = Double(manager.storage?.free ?? 0)
-                let other = max(cap - free - photos, 0)
                 GeometryReader { g in
                     HStack(spacing: 2) {
                         if cap > 0 {
-                            Rectangle().fill(Color.accentColor).frame(width: max(g.size.width * photos / cap, 2))
-                            Rectangle().fill(Color(nsColor: .tertiaryLabelColor)).frame(width: g.size.width * other / cap)
+                            ForEach(segments.filter { $0.2 > 0 }, id: \.1) { seg in
+                                Rectangle().fill(seg.0).frame(width: max(g.size.width * seg.2 / cap, 2))
+                            }
+                            if !measured { Rectangle().fill(.tertiary).frame(width: max(g.size.width * max(used - photos - system, 0) / cap, 0)) }
                         }
                         Rectangle().fill(.quaternary)
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
                 .frame(height: 12)
-                let appBytes = apps.apps.reduce(0) { $0 + $1.totalSize }
-                let system = Double(manager.storage?.system ?? 0)
-                let rest = max(other - Double(appBytes) - system, 0)
                 HStack(spacing: 20) {
-                    legend(Color.accentColor, "Photos & videos", manager.device == nil ? nil : (manager.storage?.photos ?? manager.totalBytes))
-                    legend(Color(nsColor: .tertiaryLabelColor), "Other", cap > 0 ? Int(other) : nil)
+                    ForEach(segments, id: \.1) { seg in legend(seg.0, seg.1, cap > 0 && (seg.2 > 0 || seg.1 != "Applications") ? Int(seg.2) : nil) }
                     legend(Color(nsColor: .quaternaryLabelColor), "Free", cap > 0 ? Int(free) : nil)
                     Spacer()
                 }
@@ -525,19 +534,21 @@ struct DeviceDashboard: View {
                     HStack(alignment: .top, spacing: 32) {
                         VStack(alignment: .leading, spacing: 0) {
                             Text("Breakdown").font(.system(size: 13, weight: .medium)).padding(.top, 8).padding(.bottom, 6)
-                            smallRow("Photos & videos", DeviceManager.gb(Int(photos)))
-                            smallRow("Apps and their data", appBytes > 0 ? DeviceManager.gb(appBytes) : (apps.measuring || apps.loading ? "measuring…" : "–"))
+                            smallRow("Applications and their data", measured ? DeviceManager.gb(Int(appSum)) : (apps.measuring || apps.loading ? "measuring…" : "–"))
+                            smallRow("Photos and videos", DeviceManager.gb(Int(photos)))
                             smallRow("iOS", system > 0 ? DeviceManager.gb(Int(system)) : "–")
-                            smallRow("Messages, mail, caches", appBytes > 0 ? DeviceManager.gb(Int(rest)) : "–")
                             smallRow("Free", DeviceManager.gb(Int(free)))
+                            smallRow("Free after iOS clears caches", s.map { DeviceManager.gb($0.free) } ?? "–")
+                            Text("Music, Messages, Mail and System Data count in the iPhone's Settings but cannot be read over USB.")
+                                .font(.system(size: 11)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
                         }
                         VStack(alignment: .leading, spacing: 0) {
                             Text("Largest apps").font(.system(size: 13, weight: .medium)).padding(.top, 8).padding(.bottom, 6)
                             Color.clear.frame(width: 220, height: 0)
-                            if appBytes == 0 {
+                            if !measured {
                                 Text(apps.measuring || apps.loading ? "Measuring…" : "Open Apps to measure").font(.system(size: 12)).foregroundStyle(.secondary).frame(height: 26)
                             }
-                            ForEach(appBytes > 0 ? Array(apps.apps.prefix(5)) : []) { app in
+                            ForEach(measured ? Array(apps.apps.prefix(6)) : []) { app in
                                 HStack(spacing: 8) {
                                     if let img = apps.icons[app.bundleID] {
                                         Image(nsImage: img).resizable().frame(width: 18, height: 18).clipShape(RoundedRectangle(cornerRadius: 4))

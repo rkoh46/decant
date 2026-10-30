@@ -72,7 +72,7 @@ struct DeviceInfo {
     ]
 }
 
-struct DeviceStorage { var capacity: Int; var free: Int; var photos: Int? = nil; var apps: Int? = nil; var system: Int? = nil }
+struct DeviceStorage { var capacity: Int; var free: Int; var photos: Int? = nil; var apps: Int? = nil; var system: Int? = nil; var reserved: Int? = nil }
 
 /// What the connected model looks like from the front, derived from its identifier (iPhone16,2 ...).
 struct PhoneStyle {
@@ -613,7 +613,7 @@ final class DeviceManager: NSObject, ObservableObject {
             var args: [String] = []
             if let udid = Lockdown.firstUDID() { args = ["-u", udid] }
             let batt = Lockdown.plist("ideviceinfo", args + ["-x", "-q", "com.apple.mobile.battery"])
-            let disk = Lockdown.plist("ideviceinfo", args + ["-x", "-q", "com.apple.disk_usage"])
+            let disk = Lockdown.plist("ideviceinfo", args + ["-x", "-q", "com.apple.disk_usage.factory"])
             let diag = Lockdown.plist("idevicediagnostics", args + ["ioregentry", "AppleSmartBattery"])
             await MainActor.run {
                 guard let self else { return }
@@ -646,7 +646,8 @@ final class DeviceManager: NSObject, ObservableObject {
             storage = DeviceStorage(capacity: cap, free: free,
                                     photos: d["CameraUsage"] as? Int ?? d["PhotoUsage"] as? Int,
                                     apps: d["MobileApplicationUsage"] as? Int,
-                                    system: d["TotalSystemCapacity"] as? Int)
+                                    system: d["TotalSystemCapacity"] as? Int,
+                                    reserved: d["AmountDataReserved"] as? Int)
         }
     }
 
@@ -656,7 +657,7 @@ final class DeviceManager: NSObject, ObservableObject {
             if let udid = Lockdown.firstUDID() { args = ["-u", udid] }
             let general = Lockdown.plist("ideviceinfo", args + ["-x"])
             let batt = Lockdown.plist("ideviceinfo", args + ["-x", "-q", "com.apple.mobile.battery"])
-            let disk = Lockdown.plist("ideviceinfo", args + ["-x", "-q", "com.apple.disk_usage"])
+            let disk = Lockdown.plist("ideviceinfo", args + ["-x", "-q", "com.apple.disk_usage.factory"])
             let diag = Lockdown.plist("idevicediagnostics", args + ["ioregentry", "AppleSmartBattery"])
             await MainActor.run {
                 guard let self else { return }
