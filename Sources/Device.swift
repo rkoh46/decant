@@ -729,7 +729,7 @@ extension DeviceManager: ICCameraDeviceDelegate {
         flushAdds()
         if info == nil { queryDetails(device) }
         catalogComplete = true
-        selection = Set(items.map { $0.id })
+        selection = []                      // nothing selected until the user chooses
         screenItems.forEach { if $0.thumbnail == nil { $0.file.requestThumbnail() } }
         addLog("Library read: \(photoCount) photos, \(videoCount) videos (\(liveCount) Live Photos), \(Self.gb(totalBytes))")
     }

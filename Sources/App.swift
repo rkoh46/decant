@@ -72,7 +72,7 @@ struct RootView: View {
             Divider()
             switch tab {
             case .device:
-                DeviceDashboard(destURL: destURL, copy: { begin(delete: false) }, move: { begin(delete: true) },
+                DeviceDashboard(destURL: destURL, copy: { begin(delete: false, all: true) }, move: { begin(delete: true, all: true) },
                                 chooseFolder: chooseFolder, showLog: { openWindow(id: "log") })
             case .photos:
                 PhotosPane(filter: $filter, thumbSize: $thumbSize, byDate: $byDate, skipExisting: $skipExisting,
@@ -159,10 +159,12 @@ struct RootView: View {
         if panel.runModal() == .OK, let url = panel.url { destination = url.path }
     }
 
-    private func begin(delete: Bool) {
+    /// From the Photos tab this acts on the selection; from the Device tab (`all`) on the whole library.
+    private func begin(delete: Bool, all: Bool = false) {
         if destURL == nil { chooseFolder() }
         guard let url = destURL, manager.catalogComplete, !manager.running else { return }
-        if manager.selection.isEmpty { manager.selection = Set(manager.items.map { $0.id }) }
+        if all { manager.selection = Set(manager.items.map { $0.id }) }
+        guard !manager.selection.isEmpty else { return }
         if let free = DeviceManager.freeSpace(at: url), free < manager.selectedBytes {
             spaceWarning = "The selection is \(DeviceManager.gb(manager.selectedBytes)) but only \(DeviceManager.gb(free)) is free in \(url.lastPathComponent)."
             return
@@ -478,8 +480,8 @@ struct DeviceDashboard: View {
                 Button("Choose a folder…", action: chooseFolder).buttonStyle(.link)
             }
             Spacer()
-            Button("Move to Mac…", action: move)
-            Button("Copy to Mac", action: copy).buttonStyle(.borderedProminent)
+            Button("Move All to Mac…", action: move)
+            Button("Copy All to Mac", action: copy).buttonStyle(.borderedProminent)
         }
         .controlSize(.large)
         .disabled(manager.running)
