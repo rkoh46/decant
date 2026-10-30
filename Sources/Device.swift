@@ -59,6 +59,7 @@ struct OffloadOptions {
 struct DeviceInfo {
     var manufacturer = "", model = "", version = "", serial = ""
     var modelNumber = "", region = "", udid = "", hardware = "", ecid = "", basebandSerial = "", basebandCert = ""
+    var imei = "", imei2 = "", meid = "", wifiAddress = "", bluetoothAddress = ""
     var marketingName: String { DeviceInfo.names[model] ?? model }
     static let names: [String: String] = [
         "iPhone12,1": "iPhone 11", "iPhone12,3": "iPhone 11 Pro", "iPhone12,5": "iPhone 11 Pro Max", "iPhone12,8": "iPhone SE (2nd gen)",
@@ -157,6 +158,8 @@ final class DeviceManager: NSObject, ObservableObject {
     @Published var sessionOpen = false
     @Published var canDelete = true           // false when the phone withholds delete (iCloud Photos on)
     @Published var connectAttempts = 0        // watchdog retries of a session open that never completed
+    @Published var lockdownSeesPhone = false  // cable side sees a phone the camera service has not announced yet
+    private var presenceTimer: Timer?
     private var removedByPhone = Set<ObjectIdentifier>()
     /// Items deleted through iCloud that the phone still lists until it syncs: kept out of re-reads meanwhile.
     private var pendingICloudDeletes: [String: Date] = [:]
@@ -181,6 +184,13 @@ final class DeviceManager: NSObject, ObservableObject {
             ICDeviceTypeMask.camera.rawValue | ICDeviceLocationTypeMask.local.rawValue)!
         browser.start()
         addLog("Waiting for an iPhone over USB…")
+        presenceTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+            guard let self, self.device == nil, Lockdown.available else { return }
+            Task.detached {
+                let seen = Lockdown.firstUDID() != nil
+                await MainActor.run { if self.lockdownSeesPhone != seen { self.lockdownSeesPhone = seen } }
+            }
+        }
     }
 
     // MARK: Device
@@ -194,7 +204,7 @@ final class DeviceManager: NSObject, ObservableObject {
     }
 
     var statusText: String {
-        guard device != nil else { return "No iPhone connected" }
+        guard device != nil else { return lockdownSeesPhone ? "iPhone connected, waiting for it to finish starting up…" : "No iPhone connected" }
         if locked { return "Locked: unlock and tap Trust" }
         if !sessionOpen { return "Connecting…" }
         if !catalogComplete { return "Reading library… \(items.count) items" }
@@ -571,6 +581,8 @@ final class DeviceManager: NSObject, ObservableObject {
     func shutDown() { deviceCommand("idevicediagnostics", ["shutdown"], "Shutting the iPhone down") }
     func rename(_ name: String) { deviceCommand("idevicename", [name], "Renaming the iPhone to \(name)") }
 
+    func deviceCommandPublic(_ tool: String, _ args: [String], _ what: String) { deviceCommand(tool, args, what) }
+
     private func deviceCommand(_ tool: String, _ args: [String], _ what: String) {
         addLog(what)
         Task.detached { () -> Void in
@@ -647,6 +659,11 @@ final class DeviceManager: NSObject, ObservableObject {
                     if let e = g["UniqueChipID"] as? Int { inf.ecid = String(e) }
                     if let bb = g["BasebandSerialNumber"] as? Data { inf.basebandSerial = bb.map { String(format: "%02x", $0) }.joined() }
                     if let c = g["BasebandGoldCertId"] as? Int { inf.basebandCert = String(c) }
+                    inf.imei = g["InternationalMobileEquipmentIdentity"] as? String ?? ""
+                    inf.imei2 = g["InternationalMobileEquipmentIdentity2"] as? String ?? ""
+                    inf.meid = g["MobileEquipmentIdentifier"] as? String ?? ""
+                    inf.wifiAddress = g["WiFiAddress"] as? String ?? ""
+                    inf.bluetoothAddress = g["BluetoothAddress"] as? String ?? ""
                     if !inf.model.isEmpty {
                         self.info = inf
                         self.addLog("\(inf.marketingName) (\(inf.model)), iOS \(inf.version)")

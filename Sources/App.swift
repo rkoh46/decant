@@ -24,6 +24,11 @@ struct DecantApp: App {
             LogView().environmentObject(manager)
         }
         .defaultSize(width: 600, height: 380)
+
+        Window("System Log", id: "syslog") {
+            SyslogView().environmentObject(manager)
+        }
+        .defaultSize(width: 860, height: 520)
     }
 }
 
@@ -494,88 +499,6 @@ struct DeviceDashboard: View {
     }
 }
 
-// MARK: - Tools: device actions, one row each, grouped
-
-struct ToolsPane: View {
-    @EnvironmentObject var manager: DeviceManager
-    @State private var confirmRestart = false
-    @State private var confirmShutDown = false
-    @State private var renaming = false
-    @State private var newName = ""
-    let showLog: () -> Void
-
-    private var enabled: Bool { manager.device != nil && !manager.running && Lockdown.available }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                group("Power") {
-                    toolRow("Restart", "Reboots the iPhone. It reconnects by itself afterwards.", "arrow.counterclockwise") {
-                        Button("Restart…") { confirmRestart = true }
-                    }
-                    toolRow("Shut down", "Turns the iPhone off. Press its side button to turn it on again.", "power", last: true) {
-                        Button("Shut Down…") { confirmShutDown = true }
-                    }
-                }
-                group("Device") {
-                    toolRow("Rename", "Changes the name shown in Finder, AirDrop and on the phone.", "pencil") {
-                        Button("Rename…") { newName = manager.device?.name ?? ""; renaming = true }
-                    }
-                    toolRow("Re-read library", "Reads the camera roll again after changes on the phone.", "arrow.clockwise") {
-                        Button("Re-read") { manager.refresh() }.disabled(manager.device == nil || manager.running)
-                    }
-                    toolRow("Log", "Everything Decant did this session, with times.", "doc.text", last: true) {
-                        Button("Show Log", action: showLog)
-                    }
-                }
-                if manager.device != nil && !Lockdown.available {
-                    Text("Power and rename need libimobiledevice: brew install libimobiledevice")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .padding(24)
-            .frame(maxWidth: 760, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .alert("Restart the iPhone?", isPresented: $confirmRestart) {
-            Button("Restart", role: .destructive) { manager.restart() }
-            Button("Cancel", role: .cancel) {}
-        }
-        .alert("Shut down the iPhone?", isPresented: $confirmShutDown) {
-            Button("Shut Down", role: .destructive) { manager.shutDown() }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("You will need to press its side button to turn it on again.") }
-        .alert("Rename iPhone", isPresented: $renaming) {
-            TextField("Name", text: $newName)
-            Button("Rename") { manager.rename(newName.trimmingCharacters(in: .whitespaces)) }
-                .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
-            Button("Cancel", role: .cancel) {}
-        }
-    }
-
-    private func group<Content: View>(_ title: String, @ViewBuilder _ rows: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.system(size: 13)).foregroundStyle(.secondary)
-            Card { VStack(spacing: 0, content: rows).padding(-8) }
-        }
-    }
-
-    private func toolRow<Action: View>(_ title: String, _ detail: String, _ symbol: String, last: Bool = false, @ViewBuilder action: () -> Action) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol).font(.system(size: 16)).foregroundStyle(.secondary).frame(width: 24)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13, weight: .medium))
-                Text(detail).font(.system(size: 12)).foregroundStyle(.secondary)
-            }
-            Spacer()
-            action().disabled(!enabled)
-        }
-        .padding(.horizontal, 8)
-        .frame(height: 56)
-        .overlay(alignment: .bottom) { if !last { Divider().padding(.leading, 44) } }
-    }
-}
-
 // MARK: - Phone render: shape follows the connected model, the screen shows the camera roll
 
 struct PhoneView: View {
@@ -679,6 +602,7 @@ struct PhotosPane: View {
     @State private var dragStartContent: CGPoint? = nil      // where the marquee began, in grid (content) coordinates
     @State private var pointerInViewport: CGPoint = .zero
     @StateObject private var autoscroll = AutoScroller()
+    @StateObject private var scrollHolder = ScrollViewHolder()
 
     private func count(_ f: Filter) -> Int {
         switch f {
@@ -800,6 +724,7 @@ struct PhotosPane: View {
                             }
                             .padding(8)
                             .coordinateSpace(name: "grid")
+                            .background(ScrollViewFinder(holder: scrollHolder))
                             .background(GeometryReader { g in
                                 Color.clear.preference(key: GridOriginKey.self, value: g.frame(in: .named("viewport")).origin)
                             })
@@ -823,7 +748,8 @@ struct PhotosPane: View {
                                 guard !manager.running else { return }
                                 if dragStartContent == nil {
                                     marqueeBase = NSEvent.modifierFlags.contains(.shift) ? manager.selection : []
-                                    dragStartContent = CGPoint(x: v.startLocation.x - gridOrigin.x, y: v.startLocation.y - gridOrigin.y)
+                                    let off = scrollOffset
+                                    dragStartContent = CGPoint(x: v.startLocation.x + off.x, y: v.startLocation.y + off.y)
                                 }
                                 pointerInViewport = v.location
                                 updateMarquee()
@@ -862,26 +788,33 @@ struct PhotosPane: View {
         if manager.selection.contains(item.id) { manager.selection.remove(item.id) } else { manager.selection.insert(item.id) }
     }
 
+    /// Where the content is scrolled to, from the real scroll view when we have it (the preference lags a frame).
+    private var scrollOffset: CGPoint {
+        if let sv = scrollHolder.scrollView { return sv.contentView.bounds.origin }
+        return CGPoint(x: -gridOrigin.x, y: -gridOrigin.y)
+    }
+
     private func updateMarquee() {
         guard let start = dragStartContent else { return }
-        let current = CGPoint(x: pointerInViewport.x - gridOrigin.x, y: pointerInViewport.y - gridOrigin.y)
+        let off = scrollOffset
+        let current = CGPoint(x: pointerInViewport.x + off.x, y: pointerInViewport.y + off.y)
         let r = CGRect(x: min(start.x, current.x), y: min(start.y, current.y), width: abs(current.x - start.x), height: abs(current.y - start.y))
         marquee = r
         manager.selection = marqueeBase.union(cellFrames.filter { $0.value.intersects(r) }.map { $0.key })
     }
 
-    /// Scroll so the next row past the edge becomes visible, then grow the selection into it.
+    /// Move the real scroll view a step in the drag's direction, then grow the selection into the new rows.
     private func autoscrollStep(_ proxy: ScrollViewProxy, _ direction: Int) {
-        let visibleTop = -gridOrigin.y, visibleBottom = visibleTop + viewportSize.height
-        let target: (key: String, value: CGRect)?
-        if direction > 0 {
-            target = cellFrames.filter { $0.value.maxY > visibleBottom + 1 }.min { $0.value.maxY < $1.value.maxY }
-        } else {
-            target = cellFrames.filter { $0.value.minY < visibleTop - 1 }.max { $0.value.minY < $1.value.minY }
-        }
-        guard let t = target else { autoscroll.stop(); return }
-        withAnimation(.linear(duration: 0.05)) { proxy.scrollTo(t.key, anchor: direction > 0 ? .bottom : .top) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { updateMarquee() }
+        guard let sv = scrollHolder.scrollView, let doc = sv.documentView else { autoscroll.stop(); return }
+        let clip = sv.contentView
+        var o = clip.bounds.origin
+        let maxY = max(0, doc.bounds.height - clip.bounds.height)
+        let next = min(max(0, o.y + CGFloat(direction) * 12), maxY)
+        if next == o.y { autoscroll.stop(); return }
+        o.y = next
+        clip.scroll(to: o)
+        sv.reflectScrolledClipView(clip)
+        updateMarquee()
     }
 
     /// Click toggles one item; shift-click selects the run between the last click and this one.
@@ -947,6 +880,20 @@ struct PhotosPane: View {
     }
 }
 
+/// Finds the AppKit scroll view that hosts the grid, so a drag can scroll it directly.
+final class ScrollViewHolder: ObservableObject { weak var scrollView: NSScrollView? }
+
+struct ScrollViewFinder: NSViewRepresentable {
+    let holder: ScrollViewHolder
+    final class Probe: NSView {
+        weak var holder: ScrollViewHolder?
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); holder?.scrollView = enclosingScrollView }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+    func makeNSView(context: Context) -> Probe { let p = Probe(); p.holder = holder; return p }
+    func updateNSView(_ nsView: Probe, context: Context) { nsView.holder = holder; if nsView.window != nil { holder.scrollView = nsView.enclosingScrollView } }
+}
+
 struct GridOriginKey: PreferenceKey {
     static var defaultValue: CGPoint = .zero
     static func reduce(value: inout CGPoint, nextValue: () -> CGPoint) { value = nextValue() }
@@ -960,7 +907,8 @@ final class AutoScroller: ObservableObject {
         if timer != nil && self.direction == direction { return }
         stop()
         self.direction = direction
-        timer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { _ in step() }
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { _ in step() }
+        RunLoop.main.add(timer!, forMode: .common)      // keeps ticking while the mouse button is held
     }
     func stop() { timer?.invalidate(); timer = nil; direction = 0 }
 }

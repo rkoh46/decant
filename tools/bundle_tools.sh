@@ -9,7 +9,7 @@ HELPERS="$APP/Contents/Helpers"
 mkdir -p "$HELPERS"
 cd "$(dirname "$0")/.."
 
-TOOLS=(ideviceinfo idevicediagnostics idevicename idevice_id idevicebackup2 ideviceenterrecovery afcclient idevicecrashreport)
+TOOLS=(ideviceinfo idevicediagnostics idevicename idevice_id idevicebackup2 ideviceenterrecovery afcclient idevicecrashreport idevicesyslog idevicescreenshot idevicepair)
 BREW=/opt/homebrew/bin
 VENDOR=vendor
 copied=()
