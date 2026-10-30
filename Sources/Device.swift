@@ -621,9 +621,17 @@ final class DeviceManager: NSObject, ObservableObject {
         (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int
     }
 
+    /// Original capture date on the copy, and world-readable so a photo server (Immich, Plex) can read it.
     static func stampDates(_ url: URL, _ date: Date?) {
-        guard let date else { return }
-        try? FileManager.default.setAttributes([.creationDate: date, .modificationDate: date], ofItemAtPath: url.path)
+        var attrs: [FileAttributeKey: Any] = [.posixPermissions: 0o644]
+        if let date { attrs[.creationDate] = date; attrs[.modificationDate] = date }
+        try? FileManager.default.setAttributes(attrs, ofItemAtPath: url.path)
+        // Sidecars (Live Photo movies, edits) arrive next to the file with the same stem.
+        let stem = url.deletingPathExtension().lastPathComponent
+        for f in (try? FileManager.default.contentsOfDirectory(at: url.deletingLastPathComponent(), includingPropertiesForKeys: nil)) ?? []
+            where f.deletingPathExtension().lastPathComponent == stem && f != url {
+            try? FileManager.default.setAttributes(attrs, ofItemAtPath: f.path)
+        }
     }
 
     private static let yearFmt: DateFormatter = { let f = DateFormatter(); f.dateFormat = "yyyy"; return f }()
