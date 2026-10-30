@@ -8,6 +8,7 @@ struct BackupPane: View {
     @AppStorage("backupRoot") private var backupRoot = BackupService.defaultRoot.path
     @AppStorage("backupEncrypt") private var encrypt = false
     @State private var password = ""
+    @State private var selection: String? = "phone"
     @State private var restoring: BackupInfo?
     @State private var restoreConfirmed = false
     @State private var restorePassword = ""
@@ -18,109 +19,43 @@ struct BackupPane: View {
     private var root: URL { URL(fileURLWithPath: backupRoot) }
     private var udid: String { Lockdown.cachedUDID ?? "" }
     private var ready: Bool { manager.device != nil && Lockdown.available && !backups.running && !udid.isEmpty }
+    private var selectedBackup: BackupInfo? { (backups.backups + backups.finderBackups).first { $0.id == selection } }
+    private var latest: BackupInfo? { (backups.backups + backups.finderBackups).max { $0.date < $1.date } }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Card {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text("Back up this iPhone").font(.system(size: 15, weight: .medium))
-                            Spacer()
-                            if let d = manager.device {
-                                Text("\(d.name ?? "iPhone") · iOS \(manager.info?.version ?? "–") · \(DeviceManager.gb((manager.storage?.capacity ?? 0) - (manager.storage?.free ?? 0))) used")
-                                    .font(.system(size: 13)).foregroundStyle(.secondary).monospacedDigit()
-                            }
-                        }
-                        row("Backups go to") {
-                            Text(DeviceDashboard.shortPath(root)).lineLimit(1).truncationMode(.middle)
-                            Button("Change…", action: chooseRoot).buttonStyle(.link)
-                            Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([root]) }.buttonStyle(.link)
-                            if let free = DeviceManager.freeSpace(at: root) {
-                                Text("\(DeviceManager.gb(free)) free").foregroundStyle(.secondary).monospacedDigit()
-                            }
-                        }
-                        row("Encryption") {
-                            Toggle("Encrypt backup", isOn: $encrypt)
-                            if encrypt {
-                                SecureField("Backup password", text: $password).frame(width: 220)
-                                Text("Needed for Health data, saved passwords and Wi-Fi settings").foregroundStyle(.secondary)
-                            }
-                        }
-                        if backups.running {
-                            HStack(spacing: 12) {
-                                ProgressView(value: backups.progress ?? 0).frame(maxWidth: 360)
-                                Text("\(backups.phase) \(backups.progress.map { "\(Int($0 * 100))%" } ?? "")").font(.system(size: 13)).foregroundStyle(.secondary).monospacedDigit()
-                                Spacer()
-                                Button("Stop") { backups.cancel() }
-                            }
-                        } else {
-                            HStack {
-                                Text(backups.phase).font(.system(size: 13)).foregroundStyle(.secondary)
-                                Spacer()
-                                Button("Restore from Folder…", action: restoreFromFolder).disabled(!ready)
-                                Button("Back Up Now") {
-                                    Task { await backups.backup(udid: udid, to: root, password: encrypt ? password : nil) }
-                                }
-                                .buttonStyle(.borderedProminent).disabled(!ready || (encrypt && password.isEmpty))
-                            }
-                        }
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Backups").font(.system(size: 13)).foregroundStyle(.secondary)
+        HStack(spacing: 0) {
+            List(selection: $selection) {
+                Section("Device") {
+                    HStack(spacing: 8) {
+                        Image(systemName: "iphone").font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 20)
+                        Text(manager.device?.name ?? "This iPhone")
                         Spacer()
-                        Text("\(backups.backups.count)").font(.system(size: 13)).foregroundStyle(.secondary).monospacedDigit()
                     }
-                    Card {
-                        if backups.backups.isEmpty {
-                            Text("No backups in this folder yet").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 48)
-                        } else {
-                            VStack(spacing: 0) {
-                                ForEach(Array(backups.backups.enumerated()), id: \.element.id) { i, b in
-                                    backupRow(b, last: i == backups.backups.count - 1)
-                                }
-                            }
-                            .padding(-8)
-                        }
-                    }
+                    .frame(height: 24).tag("phone")
                 }
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Finder backups").font(.system(size: 13)).foregroundStyle(.secondary)
-                        Spacer()
-                        Text("\(backups.finderBackups.count)").font(.system(size: 13)).foregroundStyle(.secondary).monospacedDigit()
+                Section("Decant backups") {
+                    if backups.backups.isEmpty {
+                        Text("None yet").font(.system(size: 12)).foregroundStyle(.secondary)
                     }
-                    Card {
-                        if !backups.finderBackupsReadable {
-                            VStack(spacing: 6) {
-                                Text("Decant needs Full Disk Access to see backups made with Finder or iTunes").foregroundStyle(.secondary)
-                                Button("Open Privacy Settings") {
-                                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
-                                }.controlSize(.small)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 48)
-                        } else if backups.finderBackups.isEmpty {
-                            Text("No Finder or iTunes backups on this Mac").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 48)
-                        } else {
-                            VStack(spacing: 0) {
-                                ForEach(Array(backups.finderBackups.enumerated()), id: \.element.id) { i, b in
-                                    backupRow(b, last: i == backups.finderBackups.count - 1, canTrash: false)
-                                }
-                            }
-                            .padding(-8)
-                        }
-                    }
+                    ForEach(backups.backups) { b in sidebarRow(b).tag(b.id) }
                 }
-                Text("A restore replaces everything on the iPhone with the backup and reboots it. Decant asks twice and never restores on its own. Backups from another Mac work too: use Restore from Folder… and pick the backup's folder.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Section("Finder backups") {
+                    if !backups.finderBackupsReadable {
+                        Text("Needs Full Disk Access").font(.system(size: 12)).foregroundStyle(.secondary)
+                    } else if backups.finderBackups.isEmpty {
+                        Text("None on this Mac").font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    ForEach(backups.finderBackups) { b in sidebarRow(b).tag(b.id) }
+                }
             }
-            .padding(24)
-            .frame(maxWidth: 900, alignment: .leading)
+            .listStyle(.sidebar)
+            .frame(width: 240)
+            Divider()
+            Group {
+                if let b = selectedBackup { backupDetail(b) } else { phoneDetail }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear { backups.log = { [weak manager] in manager?.addLog($0) }; backups.scan(root) }
         .alert("Restore this backup?", isPresented: Binding(get: { restoring != nil && !restoreConfirmed }, set: { if !$0 { restoring = nil } })) {
             Button("Continue", role: .destructive) { restoreConfirmed = true }
@@ -145,19 +80,169 @@ struct BackupPane: View {
             Button("OK") {}
         } message: { Text("Pick the backup folder itself (it contains Info.plist and Manifest.plist) or the folder that holds it.") }
         .alert("Move this backup to the Trash?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
-            Button("Move to Trash", role: .destructive) { if let d = deleting { backups.delete(d, root: root) } }
+            Button("Move to Trash", role: .destructive) { if let d = deleting { backups.delete(d, root: root); selection = "phone" } }
             Button("Cancel", role: .cancel) {}
         } message: { Text(deleting.map { "\($0.deviceName), \($0.date.formatted(date: .abbreviated, time: .shortened)), \(DeviceManager.gb($0.size))" } ?? "") }
     }
 
-    private func row<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
+    private func sidebarRow(_ b: BackupInfo) -> some View {
         HStack(spacing: 8) {
-            Text(label).foregroundStyle(.secondary).frame(width: 112, alignment: .leading)
-            content()
-            Spacer(minLength: 0)
+            Image(systemName: b.encrypted ? "lock" : "externaldrive").font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(b.deviceName).lineLimit(1)
+                Text(b.date.formatted(date: .abbreviated, time: .shortened)).font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
+            }
+            Spacer()
+            Text(DeviceManager.gb(b.size)).font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
         }
-        .font(.system(size: 13))
-        .frame(minHeight: 28)
+        .frame(height: 32)
+    }
+
+    // MARK: Device page: status, destination, encryption, the primary action, and what a backup holds
+
+    private var phoneDetail: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(manager.device?.name ?? "No iPhone").font(.system(size: 20, weight: .semibold))
+                    Text(latest.map { "Last backed up \($0.date.formatted(.relative(presentation: .named))) · \(DeviceManager.gb($0.size))" }
+                         ?? (manager.device == nil ? manager.statusText : "Never backed up with this Mac"))
+                        .font(.system(size: 13)).foregroundStyle(.secondary)
+                }
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 0) {
+                    GridRow {
+                        label("Backups go to")
+                        HStack(spacing: 8) {
+                            Text(DeviceDashboard.shortPath(root)).lineLimit(1).truncationMode(.middle)
+                            Button("Change…", action: chooseRoot).buttonStyle(.link)
+                            Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([root]) }.buttonStyle(.link)
+                        }
+                    }
+                    .frame(height: 32)
+                    GridRow {
+                        label("Free space")
+                        Text(DeviceManager.freeSpace(at: root).map(DeviceManager.gb) ?? "–").monospacedDigit()
+                    }
+                    .frame(height: 32)
+                    GridRow {
+                        label("Size on iPhone")
+                        Text(manager.storage.map { DeviceManager.gb($0.capacity - $0.free) + " used" } ?? "–").monospacedDigit()
+                    }
+                    .frame(height: 32)
+                    GridRow {
+                        label("Encryption")
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("Encrypt backup", isOn: $encrypt)
+                            if encrypt {
+                                SecureField("Backup password", text: $password).frame(width: 240)
+                            }
+                            Text("Encrypted backups also hold Health data, saved passwords and Wi-Fi settings. The password is not recoverable.")
+                                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.vertical, 6)
+                    }
+                }
+                .font(.system(size: 13))
+
+                if backups.running {
+                    HStack(spacing: 12) {
+                        ProgressView(value: backups.progress ?? 0).frame(maxWidth: 360)
+                        Text("\(backups.phase) \(backups.progress.map { "\(Int($0 * 100))%" } ?? "")").font(.system(size: 13)).foregroundStyle(.secondary).monospacedDigit()
+                        Spacer()
+                        Button("Stop") { backups.cancel() }
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        Button("Back Up Now") {
+                            Task { await backups.backup(udid: udid, to: root, password: encrypt ? password : nil) }
+                        }
+                        .buttonStyle(.borderedProminent).disabled(!ready || (encrypt && password.isEmpty))
+                        Button("Restore from Folder…", action: restoreFromFolder).disabled(!ready)
+                        if !backups.phase.isEmpty { Text(backups.phase).font(.system(size: 13)).foregroundStyle(.secondary).padding(.leading, 8) }
+                    }
+                    .controlSize(.large)
+                }
+
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("What a backup holds").font(.system(size: 13, weight: .medium))
+                    Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
+                        GridRow { include("Messages, call history, notes, voice memos") ; include("App data and documents") }
+                        GridRow { include("Home screen layout and settings") ; include("Photos and videos, unless iCloud Photos keeps them") }
+                        GridRow { include("Health, passwords, Wi-Fi: encrypted backups only") ; include("Not included: apps themselves, Face ID, Apple Pay cards") }
+                    }
+                    .font(.system(size: 12))
+                    Text("A restore replaces everything on the iPhone with the backup and reboots it. Decant asks twice and never restores on its own.")
+                        .font(.system(size: 12)).foregroundStyle(.secondary).padding(.top, 4)
+                }
+                if !backups.finderBackupsReadable {
+                    Divider()
+                    HStack(spacing: 12) {
+                        Text("Decant needs Full Disk Access to list backups made with Finder or iTunes.").font(.system(size: 12)).foregroundStyle(.secondary)
+                        Button("Open Privacy Settings") {
+                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+                        }.controlSize(.small)
+                    }
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 760, alignment: .leading)
+        }
+    }
+
+    private func include(_ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Circle().fill(.tertiary).frame(width: 4, height: 4).offset(y: -3)
+            Text(text).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: Backup page
+
+    private func backupDetail(_ b: BackupInfo) -> some View {
+        let isDecant = backups.backups.contains(b)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(b.deviceName).font(.system(size: 20, weight: .semibold))
+                    Text(b.date.formatted(date: .complete, time: .shortened)).font(.system(size: 13)).foregroundStyle(.secondary)
+                }
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 0) {
+                    detailRow("iOS version", b.version)
+                    detailRow("Size", DeviceManager.gb(b.size))
+                    detailRow("Encrypted", b.encrypted ? "Yes" : "No")
+                    detailRow("Made with", isDecant ? "Decant" : "Finder or iTunes")
+                    GridRow {
+                        label("Location")
+                        HStack(spacing: 8) {
+                            Text(DeviceDashboard.shortPath(b.url)).lineLimit(1).truncationMode(.middle)
+                            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([b.url]) }.buttonStyle(.link)
+                        }
+                    }
+                    .frame(height: 32)
+                }
+                .font(.system(size: 13))
+                HStack(spacing: 8) {
+                    Button("Restore to iPhone…") { restoring = b }.disabled(!ready)
+                    if isDecant { Button("Move to Trash…") { deleting = b }.disabled(backups.running) }
+                }
+                .controlSize(.large)
+                Text(ready ? "Restoring puts this backup on \(manager.device?.name ?? "the connected iPhone") and reboots it."
+                           : "Connect and unlock an iPhone to restore this backup.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            .padding(24)
+            .frame(maxWidth: 760, alignment: .leading)
+        }
+    }
+
+    private func detailRow(_ k: String, _ v: String) -> some View {
+        GridRow { label(k); Text(v).monospacedDigit() }.frame(height: 32)
+    }
+
+    private func label(_ s: String) -> some View {
+        Text(s).foregroundStyle(.secondary).frame(width: 128, alignment: .leading)
     }
 
     private func restoreFromFolder() {
@@ -167,27 +252,6 @@ struct BackupPane: View {
         panel.message = "Choose an iPhone backup folder (Decant, Finder or iTunes)"
         guard panel.runModal() == .OK, let u = panel.url else { return }
         if let info = backups.info(for: u) { restoring = info } else { badFolder = true }
-    }
-
-    private func backupRow(_ b: BackupInfo, last: Bool, canTrash: Bool = true) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: b.encrypted ? "lock.fill" : "externaldrive").font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 24)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(b.deviceName) · iOS \(b.version)").font(.system(size: 13, weight: .medium))
-                Text("\(b.date.formatted(date: .long, time: .shortened)) · \(DeviceManager.gb(b.size))\(b.encrypted ? " · encrypted" : "")")
-                    .font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
-            }
-            Spacer()
-            Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([b.url]) }
-            Button("Restore…") { restoring = b }.disabled(!ready)
-            if canTrash {
-                Button { deleting = b } label: { Image(systemName: "trash") }.disabled(backups.running)
-            }
-        }
-        .controlSize(.small)
-        .padding(.horizontal, 8)
-        .frame(height: 56)
-        .overlay(alignment: .bottom) { if !last { Divider().padding(.leading, 44) } }
     }
 
     private func chooseRoot() {

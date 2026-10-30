@@ -125,8 +125,14 @@ struct RootView: View {
 
     private var header: some View {
         HStack(spacing: 0) {
-            Color.clear.frame(width: 80)                       // room for the traffic lights
-            Text("Decant").font(.system(size: 16, weight: .medium))
+            Color.clear.frame(width: 72)                       // room for the traffic lights
+            HStack(spacing: 10) {
+                Image(nsImage: NSApp.applicationIconImage).resizable().interpolation(.high).frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Decant").font(.system(size: 15, weight: .semibold))
+                    Text("AIO iOS toolkit").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
             Spacer()
             HStack(spacing: 4) {
                 TabButton(title: "Device", symbol: "iphone", selected: tab == .device) { tab = .device }
@@ -703,6 +709,8 @@ struct PhotosPane: View {
     @StateObject private var autoscroll = AutoScroller()
     @StateObject private var scrollHolder = ScrollViewHolder()
     @State private var edgeDepth: CGFloat = 0                 // 0 at the edge zone's inner border, 1 at the viewport edge
+    @AppStorage("yearsExpanded") private var yearsExpanded = true
+    @AppStorage("formatsExpanded") private var formatsExpanded = true
 
     private func count(_ f: Filter) -> Int {
         switch f {
@@ -754,11 +762,23 @@ struct PhotosPane: View {
         return list.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
     }
 
-    private func sidebarRow(_ title: String, symbol: String, count: Int) -> some View {
-        HStack {
-            Label(title, systemImage: symbol)
+    private func sidebarRow(_ title: String, symbol: String? = nil, count: Int) -> some View {
+        HStack(spacing: 8) {
+            if let symbol {
+                Image(systemName: symbol).font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 20)
+            }
+            Text(title)
             Spacer()
-            if manager.device != nil { Text(count, format: .number).foregroundStyle(.secondary).monospacedDigit() }
+            if manager.device != nil { Text(count, format: .number).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit() }
+        }
+        .frame(height: 24)
+    }
+
+    private var filterTitle: String {
+        switch filter ?? .kind(.all) {
+        case .kind(let k): return k.rawValue
+        case .year(let y): return String(y)
+        case .format(let f): return f
         }
     }
 
@@ -771,16 +791,16 @@ struct PhotosPane: View {
                     }
                 }
                 if !years.isEmpty {
-                    Section("Years") {
+                    Section("Years", isExpanded: $yearsExpanded) {
                         ForEach(years, id: \.0) { y, n in
-                            sidebarRow(String(y), symbol: "calendar", count: n).tag(PhotoFilter.year(y))
+                            sidebarRow(String(y), count: n).tag(PhotoFilter.year(y))
                         }
                     }
                 }
                 if formats.count > 1 {
-                    Section("Formats") {
+                    Section("Formats", isExpanded: $formatsExpanded) {
                         ForEach(formats, id: \.0) { f, n in
-                            sidebarRow(f, symbol: "doc", count: n).tag(PhotoFilter.format(f))
+                            sidebarRow(f, count: n).tag(PhotoFilter.format(f))
                         }
                     }
                 }
@@ -798,9 +818,15 @@ struct PhotosPane: View {
         }
     }
 
+    // Columns fill the viewport edge to edge: the slider sets the smallest cell, the row takes the rest.
+    private var columns: Int { max(1, Int((max(viewportSize.width, thumbSize) - 24 + 4) / (thumbSize + 4))) }
+    private var cellSize: Double { viewportSize.width > 0 ? floor((viewportSize.width - 24 - Double(columns - 1) * 4) / Double(columns)) : thumbSize }
+
     private var gridToolbar: some View {
         HStack(spacing: 12) {
-            Text("\(shown.count.formatted()) items · \(manager.selection.count.formatted()) selected")
+            Text(filterTitle).font(.system(size: 13, weight: .medium))
+            Text("\(shown.count.formatted()) \(shown.count == 1 ? "item" : "items")"
+                 + (manager.selection.isEmpty ? "" : " · \(manager.selection.count.formatted()) selected"))
                 .font(.callout).foregroundStyle(.secondary).monospacedDigit()
             Spacer()
             Slider(value: $thumbSize, in: 80...220).frame(width: 112).help("Thumbnail size")
@@ -841,11 +867,14 @@ struct PhotosPane: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 GeometryReader { outer in
+                    if shown.isEmpty {
+                        Text("Nothing in \(filterTitle)").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
                     ScrollViewReader { proxy in
                         ScrollView {
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: thumbSize, maximum: thumbSize), spacing: 4)], spacing: 4) {
+                            LazyVGrid(columns: Array(repeating: GridItem(.fixed(cellSize), spacing: 4), count: columns), spacing: 4) {
                                 ForEach(shown) { item in
-                                    ThumbCell(item: item, size: thumbSize, selected: manager.selection.contains(item.id))
+                                    ThumbCell(item: item, size: cellSize, selected: manager.selection.contains(item.id))
                                         .background(GeometryReader { g in
                                             Color.clear.preference(key: CellFramesKey.self, value: [item.id: g.frame(in: .named("grid"))])
                                         })
@@ -910,6 +939,7 @@ struct PhotosPane: View {
                             .onEnded { _ in autoscroll.stop(); marquee = nil; dragStartContent = nil })
                         .onChange(of: outer.size) { viewportSize = $0 }
                         .onAppear { viewportSize = outer.size }
+                    }
                     }
                 }
             }
@@ -1020,8 +1050,9 @@ struct PhotosPane: View {
 
     private var copyButtonTitle: String {
         let n = manager.selection.count
-        let items = n == 1 ? "Item" : "Items"
-        return deleteAfterCopy ? "Move \(n.formatted()) \(items)" : "Copy \(n.formatted()) \(items)"
+        let verb = deleteAfterCopy ? "Move" : "Copy"
+        if n == 0 { return "\(verb) to Mac" }
+        return "\(verb) \(n.formatted()) \(n == 1 ? "Item" : "Items")"
     }
 
     private var progressText: String {
@@ -1190,9 +1221,8 @@ struct ThumbCell: View {
             VStack {
                 HStack {
                     if item.isLivePhoto {
-                        Label("Live", systemImage: "livephoto").labelStyle(.titleAndIcon)
-                            .font(.system(size: 10, weight: .medium)).padding(.horizontal, 6).frame(height: 18)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
+                        Image(systemName: "livephoto").font(.system(size: 12, weight: .medium)).foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.8), radius: 2)
                     }
                     Spacer()
                     if selected {

@@ -722,8 +722,11 @@ final class DeviceManager: NSObject, ObservableObject {
         return root.appendingPathComponent(yearFmt.string(from: date)).appendingPathComponent(monthFmt.string(from: date))
     }
 
+    /// Free space on the volume that holds `url`; a folder that does not exist yet reports its nearest existing parent.
     static func freeSpace(at url: URL) -> Int? {
-        let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        var u = url
+        while !FileManager.default.fileExists(atPath: u.path), u.pathComponents.count > 1 { u = u.deletingLastPathComponent() }
+        let values = try? u.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         return values?.volumeAvailableCapacityForImportantUsage.map(Int.init)
     }
 }
