@@ -37,7 +37,7 @@ confirmation in the UI.
      and saves the response with the generator as `.shsh2`. Verified 2026-10-30: 27.2 and 27.0.1 signed.
    - **SHSH blobs**: saved automatically each time the phone connects, for every version Apple is signing, with
      the generator `0x1111111111111111` (so a future restore can set a matching nonce) and the device's current
-     APNonce when available. Stored per ECID under `OS_Backups/Decant/Blobs/<ECID>/`. List saved blobs, verify
+     APNonce when available. Stored per ECID under the firmware folder (default `Documents/Decant/Blobs/<ECID>/`). List saved blobs, verify
      them (`tsschecker --verify`), save manually.
    - **Signing status**: which iOS versions Apple currently signs for this model (ipsw.me API), and IPSW
      downloads with checksum verification.
