@@ -254,12 +254,27 @@ final class DeviceManager: NSObject, ObservableObject {
         catalogComplete = false; sessionOpen = false; locked = false
     }
 
+    /// Re-read the library from the open session without reconnecting: the framework keeps the catalog live,
+    /// so this is instant, keeps the thumbnails already loaded, and never shows the connection dance again.
     func refresh() {
         guard let d = device else { return }
-        items = []; byFile = [:]; selection = []; catalogComplete = false
-        if d.hasOpenSession { d.requestCloseSession() }
-        connectAttempts = 0
-        openSession(d)
+        guard d.hasOpenSession else { retryConnection(); return }
+        let files = (d.mediaFiles ?? []).compactMap { $0 as? ICCameraFile }
+        var fresh: [MediaItem] = []
+        var map: [ObjectIdentifier: MediaItem] = [:]
+        for f in files {
+            let key = ObjectIdentifier(f)
+            if let existing = byFile[key] { fresh.append(existing); map[key] = existing; continue }
+            let item = MediaItem(f)
+            if let when = pendingICloudDeletes[item.id], Date().timeIntervalSince(when) < 1800 { continue }
+            fresh.append(item); map[key] = item
+        }
+        items = fresh; byFile = map; pendingAdds = []
+        selection = selection.intersection(fresh.map { $0.id })
+        catalogComplete = true
+        screenItems.forEach { if $0.thumbnail == nil { $0.file.requestThumbnail() } }
+        refreshLive()
+        addLog("Library re-read: \(items.count) items")
     }
 
     private func flushAdds() {
