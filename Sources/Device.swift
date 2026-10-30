@@ -315,8 +315,8 @@ final class DeviceManager: NSObject, ObservableObject {
             addLog("Copy finished: \(copied) copied, \(skipped) already there, \(failed) failed")
             var deleted = 0
             if opts.deleteAfterCopy && !cancelled && copied + skipped > 0 {
-                progress.phase = "Deleting from iPhone"
-                deleted = await deleteCopied(camera, targets)
+                progress.phase = canDelete ? "Deleting from iPhone" : "Deleting via iCloud"
+                deleted = canDelete ? await deleteCopied(camera, targets) : await deleteViaICloud(targets.filter { $0.status.isCopied })
             }
             progress.phase = "Done"
             var parts = ["\(copied + skipped) of \(targets.count) items on the Mac"]
@@ -351,16 +351,28 @@ final class DeviceManager: NSObject, ObservableObject {
     /// Delete items on the phone outright (context menu). Nothing is copied first; the caller has confirmed.
     func deleteFromPhone(_ items: [MediaItem]) {
         guard let camera = device, !running else { return }
-        guard canDelete else {
-            summary = "The iPhone does not allow deleting over USB while iCloud Photos is on"
-            addLog(summary!)
-            return
-        }
         running = true
         Task { @MainActor in
-            let n = await deleteFromPhone(camera, items)
-            summary = "\(n) of \(items.count) deleted from the iPhone"
+            let n = canDelete ? await deleteFromPhone(camera, items) : await deleteViaICloud(items)
+            summary = "\(n) of \(items.count) deleted" + (canDelete ? " from the iPhone" : " via iCloud")
             running = false
+        }
+    }
+
+    /// iCloud route: delete the same assets from the Mac's Photos library; iCloud removes them from the phone.
+    private func deleteViaICloud(_ items: [MediaItem]) async -> Int {
+        addLog("Deleting \(items.count) items through iCloud (Photos library on this Mac)…")
+        do {
+            let (deleted, missing) = try await PhotoLibraryDeleter.delete(items)
+            for i in deleted { i.status = .deleted }
+            for i in missing { i.status = .failed("not found in the Mac's Photos library") }
+            if !missing.isEmpty { addLog("\(missing.count) items were not in the Mac's Photos library yet (iCloud still syncing?)") }
+            addLog("Deleted \(deleted.count) through iCloud; the iPhone drops them when it syncs (Recently Deleted keeps them 30 days)")
+            return deleted.count
+        } catch {
+            addLog("iCloud delete failed: \(error.localizedDescription)")
+            for i in items { i.status = .failed(error.localizedDescription) }
+            return 0
         }
     }
 
@@ -618,7 +630,7 @@ extension DeviceManager: ICCameraDeviceDelegate {
         sessionOpen = true
         if let c = device as? ICCameraDevice {
             locked = c.isAccessRestrictedAppleDevice
-            canDelete = c.capabilities.contains(ICCameraDeviceCanDeleteOneFile.rawValue)
+            canDelete = c.capabilities.contains(ICDeviceCapability.cameraDeviceCanDeleteOneFile.rawValue)
             addLog(canDelete ? "Phone allows deleting over USB" : "Phone does not allow deleting over USB (iCloud Photos is on)")
             queryDetails(c)
         }

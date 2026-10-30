@@ -82,7 +82,9 @@ struct RootView: View {
             Button("Copy and Delete", role: .destructive) { start(delete: true) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("\(manager.selection.count.formatted()) items will be removed from the iPhone after each copy is verified. The iPhone may keep them in Recently Deleted for 30 days.")
+            Text(manager.canDelete
+                 ? "\(manager.selection.count.formatted()) items will be removed from the iPhone after each copy is verified. The iPhone may keep them in Recently Deleted for 30 days."
+                 : "\(manager.selection.count.formatted()) items will be removed from your iCloud library and every device after each copy is verified, through the Photos library on this Mac. Recently Deleted keeps them for 30 days.")
         }
         .alert("Not enough space", isPresented: Binding(get: { spaceWarning != nil }, set: { if !$0 { spaceWarning = nil } })) {
             Button("OK") {}
@@ -706,8 +708,8 @@ struct PhotosPane: View {
                                     }
                                     .disabled(manager.running)
                                     Divider()
-                                    Button(manager.canDelete ? "Delete from iPhone…" : "Delete from iPhone (turn off iCloud Photos first)", role: .destructive) { deleting = item }
-                                        .disabled(manager.running || item.status == .deleted || !manager.canDelete)
+                                    Button(manager.canDelete ? "Delete from iPhone…" : "Delete via iCloud…", role: .destructive) { deleting = item }
+                                        .disabled(manager.running || item.status == .deleted)
                                 }
                         }
                     }
@@ -724,7 +726,9 @@ struct PhotosPane: View {
             Button("Delete", role: .destructive) { if let d = deleting { manager.deleteFromPhone([d]) } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("It is not copied to the Mac first. The iPhone may keep it in Recently Deleted for 30 days.")
+            Text(manager.canDelete
+                 ? "It is not copied to the Mac first. The iPhone may keep it in Recently Deleted for 30 days."
+                 : "iCloud Photos is on, so this deletes it from your iCloud library and every device, through the Photos library on this Mac. It is not copied to the Mac first. Recently Deleted keeps it for 30 days.")
         }
         .onAppear {
             if ProcessInfo.processInfo.environment["DECANT_PREVIEW"] == "1", let first = shown.first { viewing = first }   // screenshot aid
@@ -759,8 +763,8 @@ struct PhotosPane: View {
                     }
                 }
                 Spacer()
-                Toggle("Delete after import", isOn: $deleteAfterCopy).disabled(!manager.canDelete)
-                    .help(manager.canDelete ? "" : "The iPhone does not allow deleting over USB while iCloud Photos is on")
+                Toggle(manager.canDelete ? "Delete after import" : "Delete via iCloud after import", isOn: $deleteAfterCopy)
+                    .help(manager.canDelete ? "" : "iCloud Photos is on: deletes go through the Photos library on this Mac and sync to the iPhone")
                 Button(action: start) {
                     Text(copyButtonTitle).frame(minWidth: 120)
                 }

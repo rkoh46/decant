@@ -16,7 +16,7 @@ build() {
   mkdir -p "$BUILD/Contents/MacOS" "$BUILD/Contents/Resources"
   echo ">> building app binary"
   swiftc -O -parse-as-library -o "$BUILD/Contents/MacOS/Decant" Sources/*.swift \
-    -framework SwiftUI -framework AppKit -framework ImageCaptureCore -framework AVKit
+    -framework SwiftUI -framework AppKit -framework ImageCaptureCore -framework AVKit -framework Photos
   if [ ! -f Decant.icns ]; then
     echo ">> rendering icon"
     rm -rf Decant.iconset && mkdir Decant.iconset
