@@ -66,9 +66,14 @@ Change… button; the chosen paths are saved in the app's preferences.
 
 A separate app sharing the same engine pieces: decant-tss (plain C, builds on Windows), the libimobiledevice
 tools (Windows builds exist), idevicerestore and futurerestore (Windows builds exist). What does not carry over:
-the camera-roll reader (ImageCaptureCore) becomes AFC over `afcclient` or Windows' portable-device API; the
-iCloud-delete route (PhotoKit) has no Windows equivalent, so with iCloud Photos on, deletes must go through
-Apple's own apps. Windows needs Apple's USB driver, which only ships with iTunes or the Apple Devices app and
+the camera-roll reader (ImageCaptureCore) becomes AFC over `afcclient` or Windows' portable-device API. The
+iCloud-delete route is different and simpler: iCloud for Windows keeps the library as files in the user's
+"iCloud Photos" folder, and Apple documents that deleting a photo there deletes it from every device with
+iCloud Photos on (30-day recovery, plus the PC's Recycle Bin for the local file; since iCloud for Windows 14.2
+the Microsoft Photos app behaves the same). So Decant for Windows matches the offloaded items to files in that
+folder (name first, pixel size and time as the fallback, as on the Mac) and deletes them with an ordinary file
+operation and its own confirmation; there is no system dialog. Requires iCloud for Windows signed in to the same
+account. Source: https://support.apple.com/guide/icloud-windows/icw5c1e2d1a7/ Windows needs Apple's USB driver, which only ships with iTunes or the Apple Devices app and
 cannot be bundled. UI in WinUI 3 (C#), same DESIGN.md, with Windows wording and actions: "Show in Explorer" instead of "Show in
 Finder", Explorer for folder picking and revealing, Windows' own dialogs and notifications. All testing happens
 on the Mac first.
