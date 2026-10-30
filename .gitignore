@@ -1,0 +1,4 @@
+Offload.app/
+*.icns
+*.iconset/
+.DS_Store
