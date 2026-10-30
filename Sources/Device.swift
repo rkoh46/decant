@@ -152,6 +152,8 @@ final class DeviceManager: NSObject, ObservableObject {
     @Published var catalogComplete = false
     @Published var locked = false
     @Published var sessionOpen = false
+    @Published var canDelete = true           // false when the phone withholds delete (iCloud Photos on)
+    private var removedByPhone = Set<ObjectIdentifier>()
     @Published var running = false
     @Published var progress = OffloadProgress()
     @Published var summary: String?
@@ -349,6 +351,11 @@ final class DeviceManager: NSObject, ObservableObject {
     /// Delete items on the phone outright (context menu). Nothing is copied first; the caller has confirmed.
     func deleteFromPhone(_ items: [MediaItem]) {
         guard let camera = device, !running else { return }
+        guard canDelete else {
+            summary = "The iPhone does not allow deleting over USB while iCloud Photos is on"
+            addLog(summary!)
+            return
+        }
         running = true
         Task { @MainActor in
             let n = await deleteFromPhone(camera, items)
@@ -372,15 +379,19 @@ final class DeviceManager: NSObject, ObservableObject {
                     }
                 })
             }
+            // The phone announces removals itself; wait briefly for that rather than trusting the completion.
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
             for item in chunk {
                 if failedItems.contains(ObjectIdentifier(item.file)) {
                     item.status = .failed("phone refused to delete")
-                } else {
+                } else if removedByPhone.contains(ObjectIdentifier(item.file)) || item.status == .deleted {
                     item.status = .deleted; deleted += 1
+                } else {
+                    item.status = .failed("phone did not confirm the delete")
                 }
             }
         }
-        addLog("Deleted \(deleted) of \(toDelete.count) from the iPhone")
+        addLog("Deleted \(deleted) of \(toDelete.count) from the iPhone" + (deleted < toDelete.count ? " (check Recently Deleted and the iCloud Photos setting)" : ""))
         return deleted
     }
 
@@ -607,6 +618,8 @@ extension DeviceManager: ICCameraDeviceDelegate {
         sessionOpen = true
         if let c = device as? ICCameraDevice {
             locked = c.isAccessRestrictedAppleDevice
+            canDelete = c.capabilities.contains(ICCameraDeviceCanDeleteOneFile.rawValue)
+            addLog(canDelete ? "Phone allows deleting over USB" : "Phone does not allow deleting over USB (iCloud Photos is on)")
             queryDetails(c)
         }
     }
@@ -631,6 +644,8 @@ extension DeviceManager: ICCameraDeviceDelegate {
 
     func cameraDevice(_ camera: ICCameraDevice, didRemove items: [ICCameraItem]) {
         let gone = Set(items.map { ObjectIdentifier($0) })
+        removedByPhone.formUnion(gone)
+        for k in gone { byFile[k]?.status = .deleted }
         self.items.removeAll { gone.contains(ObjectIdentifier($0.file)) }
         for k in gone { byFile[k] = nil }
     }

@@ -706,8 +706,8 @@ struct PhotosPane: View {
                                     }
                                     .disabled(manager.running)
                                     Divider()
-                                    Button("Delete from iPhone…", role: .destructive) { deleting = item }
-                                        .disabled(manager.running || item.status == .deleted)
+                                    Button(manager.canDelete ? "Delete from iPhone…" : "Delete from iPhone (turn off iCloud Photos first)", role: .destructive) { deleting = item }
+                                        .disabled(manager.running || item.status == .deleted || !manager.canDelete)
                                 }
                         }
                     }
@@ -759,7 +759,8 @@ struct PhotosPane: View {
                     }
                 }
                 Spacer()
-                Toggle("Delete after import", isOn: $deleteAfterCopy)
+                Toggle("Delete after import", isOn: $deleteAfterCopy).disabled(!manager.canDelete)
+                    .help(manager.canDelete ? "" : "The iPhone does not allow deleting over USB while iCloud Photos is on")
                 Button(action: start) {
                     Text(copyButtonTitle).frame(minWidth: 120)
                 }
