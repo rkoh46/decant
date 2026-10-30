@@ -5,11 +5,15 @@ import AVKit
 @main
 struct DecantApp: App {
     @StateObject private var manager = DeviceManager()
+    @StateObject private var backups = BackupService()
+    @StateObject private var firmware = FirmwareService()
 
     var body: some Scene {
         WindowGroup("Decant") {
             RootView()
                 .environmentObject(manager)
+                .environmentObject(backups)
+                .environmentObject(firmware)
                 .frame(minWidth: 1000, minHeight: 680)
         }
         .windowStyle(.hiddenTitleBar)
@@ -22,7 +26,7 @@ struct DecantApp: App {
     }
 }
 
-enum Tab { case device, photos, tools }
+enum Tab { case device, photos, backup, firmware, tools }
 
 enum Filter: String, CaseIterable, Identifiable {
     case all = "All Items", photos = "Photos", videos = "Videos", live = "Live Photos"
@@ -53,7 +57,7 @@ struct RootView: View {
     @AppStorage("skipExisting") private var skipExisting = true
     @AppStorage("deleteAfterCopy") private var deleteAfterCopy = false
     @AppStorage("thumbSize") private var thumbSize = 132.0
-    @State private var tab: Tab = ["photos": Tab.photos, "tools": .tools][ProcessInfo.processInfo.environment["DECANT_TAB"] ?? ""] ?? .device   // screenshot aid
+    @State private var tab: Tab = ["photos": Tab.photos, "backup": .backup, "firmware": .firmware, "tools": .tools][ProcessInfo.processInfo.environment["DECANT_TAB"] ?? ""] ?? .device   // screenshot aid
     @State private var filter: Filter? = .all
     @State private var confirmDelete = false
     @State private var spaceWarning: String?
@@ -73,6 +77,10 @@ struct RootView: View {
                 PhotosPane(filter: $filter, thumbSize: $thumbSize, byDate: $byDate, skipExisting: $skipExisting,
                            deleteAfterCopy: $deleteAfterCopy, destURL: destURL, chooseFolder: chooseFolder,
                            showLog: { openWindow(id: "log") }, start: { begin(delete: deleteAfterCopy) })
+            case .backup:
+                BackupPane(showLog: { openWindow(id: "log") })
+            case .firmware:
+                FirmwarePane(showLog: { openWindow(id: "log") })
             case .tools:
                 ToolsPane(showLog: { openWindow(id: "log") })
             }
@@ -104,8 +112,12 @@ struct RootView: View {
                     .keyboardShortcut("1", modifiers: .command)
                 TabButton(title: "Photos", symbol: "photo.on.rectangle", selected: tab == .photos) { tab = .photos }
                     .keyboardShortcut("2", modifiers: .command)
-                TabButton(title: "Tools", symbol: "wrench.and.screwdriver", selected: tab == .tools) { tab = .tools }
+                TabButton(title: "Backup", symbol: "externaldrive", selected: tab == .backup) { tab = .backup }
                     .keyboardShortcut("3", modifiers: .command)
+                TabButton(title: "Firmware", symbol: "cpu", selected: tab == .firmware) { tab = .firmware }
+                    .keyboardShortcut("4", modifiers: .command)
+                TabButton(title: "Tools", symbol: "wrench.and.screwdriver", selected: tab == .tools) { tab = .tools }
+                    .keyboardShortcut("5", modifiers: .command)
             }
             Spacer()
             deviceChip
