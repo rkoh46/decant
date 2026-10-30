@@ -125,11 +125,12 @@ struct RootView: View {
 
     private var header: some View {
         HStack(spacing: 0) {
-            Color.clear.frame(width: 72)                       // room for the traffic lights
-            HStack(spacing: 10) {
-                Image(nsImage: NSApp.applicationIconImage).resizable().interpolation(.high).frame(width: 28, height: 28)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Decant").font(.system(size: 15, weight: .semibold))
+            Color.clear.frame(width: 68)                       // the traffic lights end at 64
+            // Wordmark: the mark as a plain glyph in the text colour, name and purpose on two tight lines.
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: "iphone.and.arrow.forward").font(.system(size: 20, weight: .regular)).foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Decant").font(.system(size: 14, weight: .semibold))
                     Text("AIO iOS toolkit").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             }
@@ -532,6 +533,7 @@ struct DeviceDashboard: View {
                         }
                         VStack(alignment: .leading, spacing: 0) {
                             Text("Largest apps").font(.system(size: 13, weight: .medium)).padding(.top, 8).padding(.bottom, 6)
+                            Color.clear.frame(width: 220, height: 0)
                             if appBytes == 0 {
                                 Text(apps.measuring || apps.loading ? "Measuring…" : "Open Apps to measure").font(.system(size: 12)).foregroundStyle(.secondary).frame(height: 26)
                             }

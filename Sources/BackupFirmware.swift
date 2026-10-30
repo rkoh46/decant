@@ -399,6 +399,8 @@ struct FirmwarePane: View {
                 Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([FirmwareService.blobDir(root, ecid: ecid)]) }
                     .controlSize(.small).disabled(!connected)
             }
+            Text("Saved blobs are never replaced or deleted by Decant: Save Blobs Now only adds versions that are missing, and each file is locked read-only on disk.")
+                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Card {
                 if !Tools.has("decant-tss") {
                     Text("This build has no blob saver").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 48)
