@@ -29,15 +29,17 @@ copy_tool "$VENDOR/futurerestore/futurerestore"
 
 # Pull in every non-system dylib each binary needs, recursively, and point the binaries at the bundled copies.
 bundle_libs() {
-  local bin="$1"
-  otool -L "$bin" | awk 'NR>1 {print $1}' | grep -E '^/opt/homebrew|^/usr/local' | while read -r lib; do
-    local name; name=$(basename "$lib")
+  local bin="$1" deps lib name
+  # `|| true`: a leaf library with only system dependencies makes grep exit 1, which set -e would treat as fatal.
+  deps=$(otool -L "$bin" | awk 'NR>1 {print $1}' | grep -E '^/opt/homebrew|^/usr/local' || true)
+  for lib in $deps; do
+    name=$(basename "$lib")
     if [ ! -f "$HELPERS/$name" ]; then
       cp "$lib" "$HELPERS/$name"; chmod 644 "$HELPERS/$name"
-      install_name_tool -id "@executable_path/$name" "$HELPERS/$name"
+      install_name_tool -id "@executable_path/$name" "$HELPERS/$name" 2>/dev/null
       bundle_libs "$HELPERS/$name"
     fi
-    install_name_tool -change "$lib" "@executable_path/$name" "$bin"
+    install_name_tool -change "$lib" "@executable_path/$name" "$bin" 2>/dev/null
   done
 }
 for t in "${copied[@]}"; do bundle_libs "$HELPERS/$t"; done

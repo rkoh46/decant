@@ -2,4 +2,5 @@
 *.iconset/
 .DS_Store
 Offload.app/
+dist/
 vendor/

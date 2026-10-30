@@ -301,8 +301,8 @@ final class FirmwareService: ObservableObject {
     private var process: Process?
     var log: (String) -> Void = { _ in }
 
-    static let generator = "0x1111111111111111"      // the community convention; set this on the phone before a futurerestore
-    static func validGenerator(_ g: String) -> Bool {
+    nonisolated static let generator = "0x1111111111111111"      // the community convention; set this on the phone before a futurerestore
+    nonisolated static func validGenerator(_ g: String) -> Bool {
         g.count == 18 && g.lowercased().hasPrefix("0x") && g.dropFirst(2).allSatisfy { $0.isHexDigit }
     }
     /// ApNonce an A12+ chip derives from that generator: SHA-384 of the eight generator bytes, first 32 bytes.
