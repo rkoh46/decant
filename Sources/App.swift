@@ -603,6 +603,7 @@ struct PhotosPane: View {
     @State private var pointerInViewport: CGPoint = .zero
     @StateObject private var autoscroll = AutoScroller()
     @StateObject private var scrollHolder = ScrollViewHolder()
+    @State private var edgeDepth: CGFloat = 0                 // 0 at the edge zone's inner border, 1 at the viewport edge
 
     private func count(_ f: Filter) -> Int {
         switch f {
@@ -753,10 +754,14 @@ struct PhotosPane: View {
                                 }
                                 pointerInViewport = v.location
                                 updateMarquee()
-                                let edge: CGFloat = 40
-                                if v.location.y > viewportSize.height - edge { autoscroll.start(direction: 1) { autoscrollStep(proxy, 1) } }
-                                else if v.location.y < edge { autoscroll.start(direction: -1) { autoscrollStep(proxy, -1) } }
-                                else { autoscroll.stop() }
+                                let edge: CGFloat = 72
+                                if v.location.y > viewportSize.height - edge {
+                                    edgeDepth = min(1, (v.location.y - (viewportSize.height - edge)) / edge)
+                                    autoscroll.start(direction: 1) { autoscrollStep(proxy, 1) }
+                                } else if v.location.y < edge {
+                                    edgeDepth = min(1, (edge - v.location.y) / edge)
+                                    autoscroll.start(direction: -1) { autoscrollStep(proxy, -1) }
+                                } else { autoscroll.stop() }
                             }
                             .onEnded { _ in autoscroll.stop(); marquee = nil; dragStartContent = nil })
                         .onChange(of: outer.size) { viewportSize = $0 }
@@ -809,7 +814,8 @@ struct PhotosPane: View {
         let clip = sv.contentView
         var o = clip.bounds.origin
         let maxY = max(0, doc.bounds.height - clip.bounds.height)
-        let next = min(max(0, o.y + CGFloat(direction) * 12), maxY)
+        let step = 10 + 50 * max(edgeDepth, 0)                // 600 to 3600 points per second at 60 ticks
+        let next = min(max(0, o.y + CGFloat(direction) * step), maxY)
         if next == o.y { autoscroll.stop(); return }
         o.y = next
         clip.scroll(to: o)
