@@ -159,6 +159,10 @@ final class DeviceManager: NSObject, ObservableObject {
     @Published var canDelete = true           // false when the phone withholds delete (iCloud Photos on)
     @Published var connectAttempts = 0        // watchdog retries of a session open that never completed
     @Published var lockdownSeesPhone = false  // cable side sees a phone the camera service has not announced yet
+    @Published var lastReport: URL?
+    @Published var lastCrashExport: (URL, Int)?
+    @Published var lastScreenshot: URL?
+    @Published var lastScreenshotError: String?
     private var presenceTimer: Timer?
     private var removedByPhone = Set<ObjectIdentifier>()
     /// Items deleted through iCloud that the phone still lists until it syncs: kept out of re-reads meanwhile.

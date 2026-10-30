@@ -74,9 +74,11 @@ the Microsoft Photos app behaves the same). So Decant for Windows matches the of
 folder (name first, pixel size and time as the fallback, as on the Mac) and deletes them with an ordinary file
 operation and its own confirmation; there is no system dialog. Requires iCloud for Windows signed in to the same
 account. Source: https://support.apple.com/guide/icloud-windows/icw5c1e2d1a7/ Windows needs Apple's USB driver, which only ships with iTunes or the Apple Devices app and
-cannot be bundled. UI in WinUI 3 (C#), same DESIGN.md, with Windows wording and actions: "Show in Explorer" instead of "Show in
-Finder", Explorer for folder picking and revealing, Windows' own dialogs and notifications. All testing happens
-on the Mac first.
+cannot be bundled. UI in WinUI 3 (C#), same DESIGN.md, with Windows conventions throughout, never Mac ones carried over: "Show in
+Explorer" instead of "Show in Finder", Explorer for folder picking and revealing, Windows' own dialogs and
+notifications, Ctrl shortcuts (Ctrl+A, Ctrl+1…5), Explorer-style drag-select with edge autoscroll, a list-and-
+detail Tools pane like Windows Settings. All testing happens on the Mac first; the Windows build is tested on a
+Windows machine before release.
 
 ## Not planned
 

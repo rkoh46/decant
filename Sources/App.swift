@@ -25,10 +25,6 @@ struct DecantApp: App {
         }
         .defaultSize(width: 600, height: 380)
 
-        Window("System Log", id: "syslog") {
-            SyslogView().environmentObject(manager)
-        }
-        .defaultSize(width: 860, height: 520)
     }
 }
 

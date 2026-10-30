@@ -1,134 +1,258 @@
 import SwiftUI
 import ImageCaptureCore
 
-// MARK: - Tools: a toolbox of real device actions, grouped, one tile each
+// MARK: - Tools: a list of tools on the left, the chosen tool with its own content on the right
+
+enum Tool: String, CaseIterable, Identifiable {
+    case restart, shutDown, enterRecovery, exitRecovery
+    case rename, identifiers, report, unpair
+    case crashReports, systemLog, screenshot, battery
+    case appLog, reread
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .restart: return "Restart"
+        case .shutDown: return "Shut Down"
+        case .enterRecovery: return "Enter Recovery"
+        case .exitRecovery: return "Exit Recovery"
+        case .rename: return "Rename"
+        case .identifiers: return "Identifiers"
+        case .report: return "Device Report"
+        case .unpair: return "Unpair This Mac"
+        case .crashReports: return "Crash Reports"
+        case .systemLog: return "System Log"
+        case .screenshot: return "Screenshot"
+        case .battery: return "Battery"
+        case .appLog: return "Decant Log"
+        case .reread: return "Re-read Library"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .restart: return "arrow.counterclockwise"
+        case .shutDown: return "power"
+        case .enterRecovery: return "arrow.down.to.line"
+        case .exitRecovery: return "arrow.up.to.line"
+        case .rename: return "pencil"
+        case .identifiers: return "number"
+        case .report: return "doc.badge.arrow.up"
+        case .unpair: return "link.badge.plus"
+        case .crashReports: return "exclamationmark.triangle"
+        case .systemLog: return "text.alignleft"
+        case .screenshot: return "camera.viewfinder"
+        case .battery: return "battery.75percent"
+        case .appLog: return "doc.text"
+        case .reread: return "arrow.clockwise"
+        }
+    }
+
+    var blurb: String {
+        switch self {
+        case .restart: return "Reboots the iPhone. It reconnects by itself about a minute later."
+        case .shutDown: return "Turns the iPhone off. It stays off until its side button is held."
+        case .enterRecovery: return "Puts the iPhone in recovery mode, the state a firmware restore starts from. Nothing is changed by entering it."
+        case .exitRecovery: return "Boots an iPhone that is sitting in recovery mode back into iOS."
+        case .rename: return "The name the phone shows in Finder, AirDrop, Bluetooth and at the top of Settings."
+        case .identifiers: return "The numbers that identify this exact phone. Masked until you reveal them; each one can be copied."
+        case .report: return "Every value the phone reports about itself, saved as a property list you can open or send."
+        case .unpair: return "Removes this Mac from the phone's trusted computers. The phone asks to trust it again on the next connection."
+        case .crashReports: return "Copies the phone's crash logs to a folder on the Mac, for reading or for sending to a developer."
+        case .systemLog: return "The phone's live system log, the same stream Console shows, with a filter."
+        case .screenshot: return "Captures the phone's screen into your Pictures folder. iOS 17 and later require Developer Mode (Settings → Privacy & Security)."
+        case .battery: return "What the phone's battery reports about itself."
+        case .appLog: return "Everything Decant did in this session, with times."
+        case .reread: return "Reads the camera roll again from the open connection, without reconnecting."
+        }
+    }
+
+    static let sections: [(String, [Tool])] = [
+        ("Power", [.restart, .shutDown, .enterRecovery, .exitRecovery]),
+        ("Device", [.rename, .identifiers, .report, .unpair]),
+        ("Diagnostics", [.crashReports, .systemLog, .screenshot, .battery]),
+        ("Decant", [.appLog, .reread]),
+    ]
+}
 
 struct ToolsPane: View {
     @EnvironmentObject var manager: DeviceManager
     @EnvironmentObject var firmware: FirmwareService
-    @Environment(\.openWindow) private var openWindow
-    @State private var confirmRestart = false
-    @State private var confirmShutDown = false
-    @State private var confirmRecovery = false
-    @State private var confirmUnpair = false
-    @State private var renaming = false
-    @State private var newName = ""
-    @State private var showIdentifiers = false
-    @State private var notice: String?
+    @State private var selected: Tool? = .battery
     let showLog: () -> Void
 
-    private var ready: Bool { manager.device != nil && Lockdown.available && !manager.running && !manager.locked }
-    private let columns = [GridItem(.adaptive(minimum: 208, maximum: 260), spacing: 12)]
-
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                section("Power") {
-                    ToolTile("Restart", "arrow.counterclockwise", "Reboots the iPhone; it reconnects by itself", enabled: ready) { confirmRestart = true }
-                    ToolTile("Shut Down", "power", "Turns the iPhone off until its side button is pressed", enabled: ready) { confirmShutDown = true }
-                    ToolTile("Enter Recovery", "arrow.down.to.line", "Puts the iPhone in recovery mode for a restore", enabled: ready && Tools.has("ideviceenterrecovery")) { confirmRecovery = true }
-                    ToolTile("Exit Recovery", "arrow.up.to.line", "Boots an iPhone that is sitting in recovery mode", enabled: Tools.has("irecovery") && !manager.running) {
-                        Task { await firmware.exitRecovery() }
+        HStack(spacing: 0) {
+            List(selection: $selected) {
+                ForEach(Tool.sections, id: \.0) { title, tools in
+                    Section(title) {
+                        ForEach(tools) { t in Label(t.title, systemImage: t.symbol).tag(t) }
                     }
                 }
-                section("Device") {
-                    ToolTile("Rename", "pencil", "The name shown in Finder, AirDrop and on the phone", enabled: ready) { newName = manager.device?.name ?? ""; renaming = true }
-                    ToolTile("Identifiers", "number", "IMEI, MEID, Wi‑Fi and Bluetooth addresses, serial, UDID, ECID", enabled: manager.info != nil) { showIdentifiers = true }
-                    ToolTile("Export Device Report", "doc.badge.arrow.up", "Every value the phone reports about itself, as a file", enabled: ready) { manager.exportReport() }
-                    ToolTile("Unpair This Mac", "link.badge.plus", "Removes this Mac's trust; the phone asks to trust again", enabled: ready && Tools.has("idevicepair")) { confirmUnpair = true }
-                }
-                section("Diagnostics") {
-                    ToolTile("Crash Reports", "exclamationmark.triangle", "Copies the phone's crash logs into a folder", enabled: ready && Tools.has("idevicecrashreport")) { manager.exportCrashReports() }
-                    ToolTile("System Log", "text.alignleft", "Live log from the phone, with a filter", enabled: ready && Tools.has("idevicesyslog")) { openWindow(id: "syslog") }
-                    ToolTile("Screenshot", "camera.viewfinder", "Saves the phone's screen to Pictures (Developer Mode needed)", enabled: ready && Tools.has("idevicescreenshot")) { manager.screenshot() }
-                    ToolTile("Battery", "battery.75percent", manager.battery.map { b in
-                        "\(b.level.map { "\($0)%" } ?? "–")" + (b.health.map { String(format: " · %.0f%% health", $0) } ?? "") + (b.cycleCount.map { " · \($0.formatted()) cycles" } ?? "")
-                    } ?? "Level, health and cycle count", enabled: manager.battery != nil, info: true) {}
-                }
-                section("Decant") {
-                    ToolTile("Show Log", "doc.text", "Everything Decant did this session, with times", enabled: true, action: showLog)
-                    ToolTile("Re-read Library", "arrow.clockwise", "Reads the camera roll again without reconnecting", enabled: manager.device != nil && !manager.running) { manager.refresh() }
-                }
-                if manager.device != nil && !Lockdown.available {
-                    Text("Most tools need the device services that ship inside Decant; this build is missing them").font(.caption).foregroundStyle(.secondary)
-                }
-                if let notice { Text(notice).font(.caption).foregroundStyle(.secondary) }
             }
-            .padding(24)
-            .frame(maxWidth: 1100, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .alert("Restart the iPhone?", isPresented: $confirmRestart) {
-            Button("Restart", role: .destructive) { manager.restart() }
-            Button("Cancel", role: .cancel) {}
-        }
-        .alert("Shut down the iPhone?", isPresented: $confirmShutDown) {
-            Button("Shut Down", role: .destructive) { manager.shutDown() }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("You will need to press its side button to turn it on again.") }
-        .alert("Put the iPhone in recovery mode?", isPresented: $confirmRecovery) {
-            Button("Enter Recovery", role: .destructive) { Task { if let u = Lockdown.firstUDID() { await firmware.enterRecovery(udid: u) } } }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("The screen shows the restore symbol. Exit Recovery brings it back without changing anything.") }
-        .alert("Unpair this Mac from the iPhone?", isPresented: $confirmUnpair) {
-            Button("Unpair", role: .destructive) { manager.unpair() }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("The phone will ask whether to trust this Mac the next time it is connected.") }
-        .alert("Rename iPhone", isPresented: $renaming) {
-            TextField("Name", text: $newName)
-            Button("Rename") { manager.rename(newName.trimmingCharacters(in: .whitespaces)) }
-                .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
-            Button("Cancel", role: .cancel) {}
-        }
-        .sheet(isPresented: $showIdentifiers) { IdentifiersSheet().environmentObject(manager) }
-    }
-
-    private func section<Content: View>(_ title: String, @ViewBuilder _ tiles: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.system(size: 13)).foregroundStyle(.secondary)
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 12, content: tiles)
+            .listStyle(.sidebar)
+            .frame(width: 220)
+            Divider()
+            ScrollView {
+                if let tool = selected {
+                    ToolDetail(tool: tool)
+                        .environmentObject(manager).environmentObject(firmware)
+                        .padding(24)
+                        .frame(maxWidth: 760, alignment: .leading)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
 
-struct ToolTile: View {
-    let title: String, symbol: String, detail: String, enabled: Bool, info: Bool, action: () -> Void
-    @State private var hovering = false
+// MARK: - The selected tool
 
-    init(_ title: String, _ symbol: String, _ detail: String, enabled: Bool, info: Bool = false, action: @escaping () -> Void) {
-        self.title = title; self.symbol = symbol; self.detail = detail; self.enabled = enabled; self.info = info; self.action = action
-    }
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: symbol).font(.system(size: 20)).foregroundStyle(.secondary).frame(height: 24)
-                Text(title).font(.system(size: 13, weight: .medium))
-                Text(detail).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
-            .padding(16)
-            .background(Color(nsColor: hovering && enabled ? .selectedContentBackgroundColor : .controlBackgroundColor).opacity(hovering && enabled ? 0.18 : 1),
-                        in: RoundedRectangle(cornerRadius: 10))
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
-            .contentShape(RoundedRectangle(cornerRadius: 10))
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled || info)
-        .opacity(enabled ? 1 : 0.5)
-        .onHover { hovering = $0 && !info }
-    }
-}
-
-// MARK: - Identifiers sheet: masked by default, each copyable
-
-struct IdentifiersSheet: View {
+struct ToolDetail: View {
     @EnvironmentObject var manager: DeviceManager
-    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var firmware: FirmwareService
+    let tool: Tool
+    @State private var confirming = false
+    @State private var newName = ""
     @State private var revealed = false
 
-    private var rows: [(String, String)] {
+    private var ready: Bool { manager.device != nil && Lockdown.available && !manager.running && !manager.locked }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: tool.symbol).font(.system(size: 26, weight: .light)).foregroundStyle(.secondary).frame(width: 32)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(tool.title).font(.system(size: 22, weight: .medium))
+                    Text(tool.blurb).font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            content
+            if manager.device == nil {
+                Text(manager.statusText).font(.caption).foregroundStyle(.secondary)
+            } else if !Lockdown.available {
+                Text("This build is missing the device services, so most tools cannot run").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { newName = manager.device?.name ?? "" }
+        .onChange(of: manager.device?.name) { newName = $0 ?? "" }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch tool {
+        case .restart:
+            destructive("Restart iPhone", confirm: "Restart the iPhone?", message: "It disconnects while rebooting and comes back on its own.") { manager.restart() }
+        case .shutDown:
+            destructive("Shut Down iPhone", confirm: "Shut down the iPhone?", message: "You will need to hold its side button to turn it on again.") { manager.shutDown() }
+        case .enterRecovery:
+            VStack(alignment: .leading, spacing: 12) {
+                row("Current mode", firmware.mode.rawValue)
+                destructive("Enter Recovery Mode", confirm: "Put the iPhone in recovery mode?", message: "The screen shows the restore symbol. Exit Recovery brings it back without changing anything.",
+                            enabled: ready && Tools.has("ideviceenterrecovery")) {
+                    Task { if let u = Lockdown.firstUDID() { await firmware.enterRecovery(udid: u) } }
+                }
+            }
+        case .exitRecovery:
+            VStack(alignment: .leading, spacing: 12) {
+                row("Current mode", firmware.mode.rawValue)
+                HStack {
+                    Button("Exit Recovery Mode") { Task { await firmware.exitRecovery() } }.disabled(!Tools.has("irecovery") || firmware.running)
+                    Button("Check Mode") { Task { await firmware.refreshMode() } }.disabled(firmware.running)
+                }
+            }
+        case .rename:
+            HStack(spacing: 8) {
+                TextField("Name", text: $newName).textFieldStyle(.roundedBorder).frame(width: 280)
+                Button("Rename") { manager.rename(newName.trimmingCharacters(in: .whitespaces)) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!ready || newName.trimmingCharacters(in: .whitespaces).isEmpty || newName == manager.device?.name)
+            }
+        case .identifiers:
+            identifiers
+        case .report:
+            VStack(alignment: .leading, spacing: 12) {
+                Button("Save Device Report…") { manager.exportReport() }.buttonStyle(.borderedProminent).disabled(!ready)
+                if let u = manager.lastReport {
+                    HStack { Text("Saved to \(u.path)").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([u]) }.buttonStyle(.link).font(.system(size: 12)) }
+                }
+            }
+        case .unpair:
+            destructive("Unpair This Mac", confirm: "Unpair this Mac from the iPhone?", message: "Decant and Finder lose access until you tap Trust on the phone again.",
+                        enabled: ready && Tools.has("idevicepair")) { manager.unpair() }
+        case .crashReports:
+            VStack(alignment: .leading, spacing: 12) {
+                Button("Copy Crash Reports…") { manager.exportCrashReports() }.buttonStyle(.borderedProminent).disabled(!ready || !Tools.has("idevicecrashreport"))
+                if let (dir, n) = manager.lastCrashExport {
+                    HStack { Text("\(n) reports in \(dir.path)").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([dir]) }.buttonStyle(.link).font(.system(size: 12)) }
+                }
+            }
+        case .systemLog:
+            SyslogView(embedded: true).environmentObject(manager)
+                .frame(height: 440)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
+        case .screenshot:
+            VStack(alignment: .leading, spacing: 12) {
+                Button("Take Screenshot") { manager.screenshot() }.buttonStyle(.borderedProminent).disabled(!ready || !Tools.has("idevicescreenshot"))
+                if let u = manager.lastScreenshot, let img = NSImage(contentsOf: u) {
+                    Image(nsImage: img).resizable().aspectRatio(contentMode: .fit).frame(maxHeight: 420)
+                        .clipShape(RoundedRectangle(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
+                    HStack { Text(u.lastPathComponent).font(.system(size: 12)).foregroundStyle(.secondary)
+                        Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([u]) }.buttonStyle(.link).font(.system(size: 12)) }
+                } else if let e = manager.lastScreenshotError {
+                    Text(e).font(.system(size: 12)).foregroundStyle(Tone.warning).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        case .battery:
+            if let b = manager.battery {
+                VStack(spacing: 0) {
+                    row("Charge", b.level.map { "\($0)%" } ?? "–")
+                    row("State", b.charging == true ? "Charging" : b.charging == false ? "On battery" : "–")
+                    row("Health", b.health.map { String(format: "%.0f%% of design capacity", $0) } ?? "–")
+                    row("Cycle count", b.cycleCount.map { $0.formatted() } ?? "–")
+                    row("Design capacity", b.designCapacity.map { "\($0.formatted()) mAh" } ?? "–")
+                    row("Current full capacity", b.maxCapacity.map { "\($0.formatted()) mAh" } ?? "–")
+                }
+                Text("Apple replaces batteries under warranty below 80% health. Figures refresh every 30 seconds while connected.").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Connect an iPhone to read its battery").foregroundStyle(.secondary)
+            }
+        case .appLog:
+            LogView().environmentObject(manager)
+                .frame(height: 440)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
+        case .reread:
+            HStack(spacing: 12) {
+                Button("Re-read Library") { manager.refresh() }.buttonStyle(.borderedProminent).disabled(manager.device == nil || manager.running)
+                Text("\(manager.items.count.formatted()) items · \(DeviceManager.gb(manager.totalBytes))").font(.system(size: 13)).foregroundStyle(.secondary).monospacedDigit()
+            }
+        }
+    }
+
+    private func destructive(_ label: String, confirm: String, message: String, enabled: Bool? = nil, action: @escaping () -> Void) -> some View {
+        Button(label) { confirming = true }
+            .disabled(!(enabled ?? ready))
+            .alert(confirm, isPresented: $confirming) {
+                Button(label, role: .destructive, action: action)
+                Button("Cancel", role: .cancel) {}
+            } message: { Text(message) }
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label).foregroundStyle(.secondary).frame(width: 160, alignment: .leading)
+            Text(value).fontWeight(.medium).monospacedDigit()
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 13))
+        .frame(height: 32)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var identifierRows: [(String, String)] {
         guard let i = manager.info else { return [] }
         return [("Serial number", i.serial), ("UDID", i.udid), ("ECID", i.ecid), ("IMEI", i.imei), ("IMEI 2", i.imei2),
                 ("MEID", i.meid), ("Wi‑Fi address", i.wifiAddress), ("Bluetooth address", i.bluetoothAddress),
@@ -136,44 +260,35 @@ struct IdentifiersSheet: View {
             .filter { !$0.1.isEmpty }
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Identifiers").font(.system(size: 15, weight: .medium))
-                Spacer()
+    private var identifiers: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if identifierRows.isEmpty {
+                Text("Connect an iPhone to read its identifiers").foregroundStyle(.secondary)
+            } else {
                 Toggle("Reveal", isOn: $revealed).toggleStyle(.switch).controlSize(.small)
-            }
-            .padding(16)
-            Divider()
-            VStack(spacing: 0) {
-                ForEach(rows, id: \.0) { label, value in
-                    HStack(spacing: 12) {
-                        Text(label).foregroundStyle(.secondary).frame(width: 140, alignment: .leading)
-                        Text(revealed ? value : String(repeating: "•", count: min(value.count, 24))).monospaced().textSelection(.enabled)
-                        Spacer()
-                        Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string) } label: {
-                            Image(systemName: "doc.on.doc").font(.system(size: 12))
+                VStack(spacing: 0) {
+                    ForEach(identifierRows, id: \.0) { label, value in
+                        HStack(spacing: 8) {
+                            Text(label).foregroundStyle(.secondary).frame(width: 160, alignment: .leading)
+                            Text(revealed ? value : String(repeating: "•", count: min(value.count, 24))).monospaced().textSelection(.enabled)
+                            Spacer()
+                            Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string) } label: {
+                                Image(systemName: "doc.on.doc").font(.system(size: 12))
+                            }
+                            .buttonStyle(.borderless).help("Copy")
                         }
-                        .buttonStyle(.borderless).help("Copy")
+                        .font(.system(size: 13))
+                        .frame(height: 32)
+                        .overlay(alignment: .bottom) { Divider() }
                     }
-                    .font(.system(size: 13))
-                    .padding(.horizontal, 16).frame(height: 36)
-                    .overlay(alignment: .bottom) { Divider().padding(.leading, 16) }
                 }
+                Text("Treat these like passwords: together they identify this exact phone.").font(.caption).foregroundStyle(.secondary)
             }
-            Divider()
-            HStack {
-                Text("Treat these like passwords: they identify this exact phone.").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
-            }
-            .padding(16)
         }
-        .frame(width: 560)
     }
 }
 
-// MARK: - System log window
+// MARK: - System log, streamed from the phone
 
 @MainActor
 final class SyslogService: ObservableObject {
@@ -204,6 +319,7 @@ struct SyslogView: View {
     @StateObject private var log = SyslogService()
     @State private var filter = ""
     @State private var paused = false
+    var embedded = false
 
     private var shown: [String] {
         filter.isEmpty ? log.lines : log.lines.filter { $0.localizedCaseInsensitiveContains(filter) }
@@ -212,7 +328,7 @@ struct SyslogView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                TextField("Filter", text: $filter).textFieldStyle(.roundedBorder).frame(width: 240)
+                TextField("Filter", text: $filter).textFieldStyle(.roundedBorder).frame(width: 220)
                 Toggle("Pause", isOn: $paused).toggleStyle(.checkbox)
                 Button("Clear") { log.lines = [] }
                 Spacer()
@@ -221,6 +337,7 @@ struct SyslogView: View {
                     if log.running { log.stop() } else if let u = Lockdown.firstUDID() { log.start(udid: u) }
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(manager.device == nil || !Tools.has("idevicesyslog"))
             }
             .controlSize(.small)
             .padding(12)
@@ -232,6 +349,9 @@ struct SyslogView: View {
                             Text(line).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading).id(i)
                         }
+                        if shown.isEmpty {
+                            Text(log.running ? "Waiting for log lines…" : "Press Start to stream the phone's log").foregroundStyle(.secondary).padding(8)
+                        }
                     }
                     .padding(8)
                 }
@@ -240,13 +360,12 @@ struct SyslogView: View {
                 }
             }
         }
-        .frame(minWidth: 720, minHeight: 420)
-        .onAppear { if let u = Lockdown.firstUDID() { log.start(udid: u) } }
+        .frame(minWidth: embedded ? 0 : 720, minHeight: embedded ? 0 : 420)
         .onDisappear { log.stop() }
     }
 }
 
-// MARK: - Device-side actions behind the tiles
+// MARK: - Device-side actions
 
 extension DeviceManager {
     func unpair() { deviceCommandPublic("idevicepair", ["unpair"], "Unpairing this Mac") }
@@ -261,8 +380,8 @@ extension DeviceManager {
             let data = Lockdown.run("ideviceinfo", ["-u", udid, "-x"])
             await MainActor.run {
                 if let data, (try? data.write(to: url)) != nil {
+                    self.lastReport = url
                     self.addLog("Device report saved to \(url.path)")
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
                 } else {
                     self.addLog("Could not read the device report")
                 }
@@ -279,10 +398,10 @@ extension DeviceManager {
         guard panel.runModal() == .OK, let dir = panel.url else { return }
         addLog("Copying crash reports to \(dir.path)…")
         Task { @MainActor in
-            var count = 0
-            let status = await Tools.stream("idevicecrashreport", ["-u", udid, "-e", dir.path]) { l in if l.contains("Copy") || l.hasSuffix(".ips") { count += 1 } }
-            addLog(status == 0 ? "Crash reports copied (\(count) files mentioned)" : "Crash report copy failed")
-            if status == 0 { NSWorkspace.shared.activateFileViewerSelecting([dir]) }
+            let status = await Tools.stream("idevicecrashreport", ["-u", udid, "-e", dir.path]) { _ in }
+            let count = ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.hasSuffix(".ips") || $0.hasSuffix(".crash") }.count
+            addLog(status == 0 ? "Crash reports copied: \(count) files" : "Crash report copy failed")
+            if status == 0 { lastCrashExport = (dir, count) }
         }
     }
 
@@ -297,10 +416,11 @@ extension DeviceManager {
             var output = ""
             let status = await Tools.stream("idevicescreenshot", ["-u", udid, url.path]) { output += $0 + " " }
             if status == 0, FileManager.default.fileExists(atPath: url.path) {
+                lastScreenshot = url; lastScreenshotError = nil
                 addLog("Screenshot saved to \(url.path)")
-                NSWorkspace.shared.activateFileViewerSelecting([url])
             } else {
-                addLog("Screenshot failed: \(output.trimmingCharacters(in: .whitespaces)). On iOS 17 and later turn on Developer Mode (Settings → Privacy & Security → Developer Mode).")
+                lastScreenshotError = "Screenshot failed: \(output.trimmingCharacters(in: .whitespaces)). On iOS 17 and later, turn on Developer Mode in Settings → Privacy & Security, then try again."
+                addLog(lastScreenshotError!)
             }
         }
     }
