@@ -168,7 +168,43 @@ final class BackupService: ObservableObject {
             .appendingPathComponent("Decant/Backups")
     }
 
+    /// Finder/iTunes backups live here; reading it needs Full Disk Access, which `finderBackupsReadable` reports.
+    static let finderRoot = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/MobileSync/Backup")
+    @Published var finderBackups: [BackupInfo] = []
+    @Published var finderBackupsReadable = true
+
+    /// Describe one backup folder (the <UDID> folder, or a folder that contains one). Nil when it is not a backup.
+    func info(for folder: URL) -> BackupInfo? {
+        let fm = FileManager.default
+        var dir = folder
+        if !fm.fileExists(atPath: dir.appendingPathComponent("Info.plist").path) {
+            guard let sub = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?
+                .first(where: { fm.fileExists(atPath: $0.appendingPathComponent("Info.plist").path) }) else { return nil }
+            dir = sub
+        }
+        guard let info = plist(dir.appendingPathComponent("Info.plist")) else { return nil }
+        let manifest = plist(dir.appendingPathComponent("Manifest.plist"))
+        return BackupInfo(url: dir,
+                          date: info["Last Backup Date"] as? Date ?? (try? fm.attributesOfItem(atPath: dir.path))?[.modificationDate] as? Date ?? .distantPast,
+                          size: Self.folderSize(dir),
+                          deviceName: info["Device Name"] as? String ?? dir.lastPathComponent,
+                          version: info["Product Version"] as? String ?? "",
+                          encrypted: manifest?["IsEncrypted"] as? Bool ?? false)
+    }
+
+    func scanFinder() {
+        let fm = FileManager.default
+        guard let dirs = try? fm.contentsOfDirectory(at: Self.finderRoot, includingPropertiesForKeys: nil) else {
+            finderBackupsReadable = !fm.fileExists(atPath: Self.finderRoot.path) ? true : false
+            finderBackups = []
+            return
+        }
+        finderBackupsReadable = true
+        finderBackups = dirs.compactMap { info(for: $0) }.sorted { $0.date > $1.date }
+    }
+
     func scan(_ root: URL) {
+        scanFinder()
         let fm = FileManager.default
         var found: [BackupInfo] = []
         // idevicebackup2 writes <root>/<UDID>/{Info.plist, Manifest.plist, ...}; we also accept dated subfolders.

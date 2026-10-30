@@ -10,7 +10,9 @@ struct BackupPane: View {
     @State private var password = ""
     @State private var restoring: BackupInfo?
     @State private var restoreConfirmed = false
+    @State private var restorePassword = ""
     @State private var deleting: BackupInfo?
+    @State private var badFolder = false
     let showLog: () -> Void
 
     private var root: URL { URL(fileURLWithPath: backupRoot) }
@@ -56,6 +58,7 @@ struct BackupPane: View {
                             HStack {
                                 Text(backups.phase).font(.system(size: 13)).foregroundStyle(.secondary)
                                 Spacer()
+                                Button("Restore from Folder…", action: restoreFromFolder).disabled(!ready)
                                 Button("Back Up Now") {
                                     Task { await backups.backup(udid: udid, to: root, password: encrypt ? password : nil) }
                                 }
@@ -84,7 +87,34 @@ struct BackupPane: View {
                         }
                     }
                 }
-                Text("A restore replaces everything on the iPhone with the backup and reboots it. Decant asks twice and never restores on its own.")
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Finder backups").font(.system(size: 13)).foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(backups.finderBackups.count)").font(.system(size: 13)).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    Card {
+                        if !backups.finderBackupsReadable {
+                            VStack(spacing: 6) {
+                                Text("Decant needs Full Disk Access to see backups made with Finder or iTunes").foregroundStyle(.secondary)
+                                Button("Open Privacy Settings") {
+                                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+                                }.controlSize(.small)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                        } else if backups.finderBackups.isEmpty {
+                            Text("No Finder or iTunes backups on this Mac").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 48)
+                        } else {
+                            VStack(spacing: 0) {
+                                ForEach(Array(backups.finderBackups.enumerated()), id: \.element.id) { i, b in
+                                    backupRow(b, last: i == backups.finderBackups.count - 1, canTrash: false)
+                                }
+                            }
+                            .padding(-8)
+                        }
+                    }
+                }
+                Text("A restore replaces everything on the iPhone with the backup and reboots it. Decant asks twice and never restores on its own. Backups from another Mac work too: use Restore from Folder… and pick the backup's folder.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .padding(24)
@@ -101,14 +131,19 @@ struct BackupPane: View {
             }
         }
         .alert("Last check", isPresented: $restoreConfirmed) {
+            if restoring?.encrypted == true { SecureField("Backup password", text: $restorePassword) }
             Button("Restore and Reboot", role: .destructive) {
-                if let r = restoring { Task { await backups.restore(r, udid: udid, password: r.encrypted ? password : nil) } }
-                restoring = nil
+                if let r = restoring { Task { await backups.restore(r, udid: udid, password: r.encrypted ? restorePassword : nil) } }
+                restoring = nil; restorePassword = ""
             }
-            Button("Cancel", role: .cancel) { restoring = nil }
+            .disabled(restoring?.encrypted == true && restorePassword.isEmpty)
+            Button("Cancel", role: .cancel) { restoring = nil; restorePassword = "" }
         } message: {
-            Text(restoring?.encrypted == true ? "This backup is encrypted. The password field above must hold its password." : "The iPhone will restart when the restore finishes.")
+            Text(restoring?.encrypted == true ? "This backup is encrypted. Enter its password to continue." : "The iPhone will restart when the restore finishes.")
         }
+        .alert("That folder is not an iPhone backup", isPresented: $badFolder) {
+            Button("OK") {}
+        } message: { Text("Pick the backup folder itself (it contains Info.plist and Manifest.plist) or the folder that holds it.") }
         .alert("Move this backup to the Trash?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("Move to Trash", role: .destructive) { if let d = deleting { backups.delete(d, root: root) } }
             Button("Cancel", role: .cancel) {}
@@ -125,7 +160,16 @@ struct BackupPane: View {
         .frame(minHeight: 28)
     }
 
-    private func backupRow(_ b: BackupInfo, last: Bool) -> some View {
+    private func restoreFromFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true; panel.canChooseFiles = false
+        panel.prompt = "Use this backup"
+        panel.message = "Choose an iPhone backup folder (Decant, Finder or iTunes)"
+        guard panel.runModal() == .OK, let u = panel.url else { return }
+        if let info = backups.info(for: u) { restoring = info } else { badFolder = true }
+    }
+
+    private func backupRow(_ b: BackupInfo, last: Bool, canTrash: Bool = true) -> some View {
         HStack(spacing: 12) {
             Image(systemName: b.encrypted ? "lock.fill" : "externaldrive").font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
@@ -136,7 +180,9 @@ struct BackupPane: View {
             Spacer()
             Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([b.url]) }
             Button("Restore…") { restoring = b }.disabled(!ready)
-            Button { deleting = b } label: { Image(systemName: "trash") }.disabled(backups.running)
+            if canTrash {
+                Button { deleting = b } label: { Image(systemName: "trash") }.disabled(backups.running)
+            }
         }
         .controlSize(.small)
         .padding(.horizontal, 8)
