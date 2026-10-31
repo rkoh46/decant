@@ -515,3 +515,53 @@ final class FirmwareService: ObservableObject {
 
     func cancel() { process?.terminate() }
 }
+
+// MARK: - Media usage over AFC (Music, synced iTunes content)
+
+/// Sizes the folders on the phone's Media partition that iPhone Settings counts as Music. There is no "du" over
+/// AFC, so this walks the tree level by level, one afcclient session per level, and adds up the file sizes.
+enum MediaUsage {
+    static func folderBytes(udid: String, roots: [String]) async -> Int {
+        var total = 0
+        var level = roots
+        var depth = 0
+        while !level.isEmpty && depth < 8 {
+            let chunks = await list(level, udid: udid)
+            var next: [String] = []
+            for (dir, lines) in zip(level, chunks) {
+                for line in lines {
+                    let parts = line.split(separator: " ", maxSplits: 8, omittingEmptySubsequences: true).map(String.init)
+                    guard parts.count >= 9, parts[0].count >= 10 else { continue }
+                    let tail = parts[8].split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+                    let name = tail.count > 1 ? String(tail[1]) : ""
+                    guard !name.isEmpty, name != ".", name != ".." else { continue }
+                    if parts[0].hasPrefix("d") { next.append((dir as NSString).appendingPathComponent(name)) }
+                    else { total += Int(parts[4]) ?? 0 }
+                }
+            }
+            level = next
+            depth += 1
+        }
+        return total
+    }
+
+    /// One afcclient run with an `ls -l` per directory; the prompt that precedes each command's output is the
+    /// separator between chunks, so chunk i belongs to directory i.
+    private static func list(_ dirs: [String], udid: String) async -> [[String]] {
+        var chunks: [[String]] = []
+        var current: [String]? = nil
+        let input = dirs.map { "ls -l \"\($0.replacingOccurrences(of: "\"", with: "\\\""))\"" }.joined(separator: "\n") + "\nquit\n"
+        await Tools.stream("afcclient", ["-u", udid], input: input) { l in
+            var s = l.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
+            while let r = s.range(of: #"^afc:[^>]*> "#, options: .regularExpression) {
+                if let c = current { chunks.append(c) }
+                current = []
+                s.removeSubrange(r)
+            }
+            if !s.trimmingCharacters(in: .whitespaces).isEmpty { current?.append(s) }
+        }
+        if let c = current { chunks.append(c) }
+        while chunks.count < dirs.count { chunks.append([]) }
+        return Array(chunks.prefix(dirs.count))
+    }
+}

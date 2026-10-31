@@ -72,7 +72,11 @@ struct DeviceInfo {
     ]
 }
 
-struct DeviceStorage { var capacity: Int; var free: Int; var photos: Int? = nil; var apps: Int? = nil; var system: Int? = nil; var reserved: Int? = nil }
+struct DeviceStorage {
+    var capacity: Int; var free: Int
+    var photos: Int? = nil, apps: Int? = nil, system: Int? = nil, reserved: Int? = nil
+    var music: Int? = nil, messages: Int? = nil, mail: Int? = nil     // measured once per connection, see measureMediaUsage
+}
 
 /// What the connected model looks like from the front, derived from its identifier (iPhone16,2 ...).
 struct PhoneStyle {
@@ -269,7 +273,7 @@ final class DeviceManager: NSObject, ObservableObject {
         liveTimer?.invalidate(); liveTimer = nil
         if let d = device, d.hasOpenSession { d.requestCloseSession() }
         device = nil
-        info = nil; storage = nil; battery = nil
+        info = nil; storage = nil; battery = nil; mediaUsage = nil
         items = []; byFile = [:]; pendingAdds = []
         selection = []
         catalogComplete = false; sessionOpen = false; locked = false
@@ -619,6 +623,38 @@ final class DeviceManager: NSObject, ObservableObject {
                 guard let self else { return }
                 self.applyBattery(batt, diag)
                 self.applyDisk(disk)
+                self.measureMediaUsage()
+            }
+        }
+    }
+
+    private var mediaUsage: (music: Int, messages: Int, mail: Int)?
+    private var measuringMedia = false
+
+    /// Music (synced tracks and Apple Music downloads on the Media partition), Messages and Mail, the way the
+    /// iPhone's Settings lists them. Slow-ish (a folder walk), so once per connection, off the main thread.
+    private func measureMediaUsage() {
+        if let m = mediaUsage { storage?.music = m.music; storage?.messages = m.messages; storage?.mail = m.mail; return }
+        guard !measuringMedia, let udid = Lockdown.cachedUDID, Tools.has("afcclient") else { return }
+        measuringMedia = true
+        Task.detached(priority: .utility) { [weak self] () -> Void in
+            let music = await MediaUsage.folderBytes(udid: udid, roots: ["/Music", "/iTunes_Control/Music", "/iTunes_Control/iTunes", "/Purchases"])
+            var messages = 0, mail = 0
+            if let data = Lockdown.run("ideviceinstaller", ["-u", udid, "list", "--system", "--xml", "-b", "com.apple.MobileSMS", "-b", "com.apple.mobilemail",
+                                                             "-a", "CFBundleIdentifier", "-a", "DynamicDiskUsage"]),
+               let list = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [[String: Any]] {
+                for d in list {
+                    let n = d["DynamicDiskUsage"] as? Int ?? 0
+                    if d["CFBundleIdentifier"] as? String == "com.apple.MobileSMS" { messages = n }
+                    if d["CFBundleIdentifier"] as? String == "com.apple.mobilemail" { mail = n }
+                }
+            }
+            await MainActor.run {
+                guard let self else { return }
+                self.mediaUsage = (music, messages, mail)
+                self.measuringMedia = false
+                self.storage?.music = music; self.storage?.messages = messages; self.storage?.mail = mail
+                self.addLog("Storage: music \(DeviceManager.gb(music)), messages \(DeviceManager.gb(messages)), mail \(DeviceManager.gb(mail))")
             }
         }
     }

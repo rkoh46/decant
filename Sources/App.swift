@@ -491,12 +491,17 @@ struct DeviceDashboard: View {
         let photos = Double(s?.photos ?? manager.totalBytes)
         let system = Double(s?.system ?? 0)
         let appSum = Double(apps.apps.reduce(0) { $0 + $1.totalSize })
+        let music = Double(s?.music ?? 0), messages = Double(s?.messages ?? 0), mail = Double(s?.mail ?? 0)
         let measured = appSum > 0
-        let used = measured ? appSum + photos + system : (cap > 0 ? cap - Double(s?.free ?? 0) : 0)
+        let used = measured ? appSum + music + messages + photos + mail + system : (cap > 0 ? cap - Double(s?.free ?? 0) : 0)
         let free = max(cap - used, 0)
+        // Settings' order and colours: Applications, Music, Messages, Photos, Mail, iOS.
         let segments: [(Color, String, Double)] = [
             (Color(nsColor: .systemRed), "Applications", measured ? appSum : 0),
+            (Color(nsColor: .systemOrange), "Music", music),
+            (Color(nsColor: .systemYellow), "Messages", messages),
             (Color(nsColor: .systemGreen), "Photos", photos),
+            (Color(nsColor: .systemTeal), "Mail", mail),
             (Color(nsColor: .systemGray), "iOS", system),
         ]
         return Card(fill: true) {
@@ -524,7 +529,7 @@ struct DeviceDashboard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
                 .frame(height: 12)
-                HStack(spacing: 20) {
+                HStack(spacing: 16) {
                     ForEach(segments, id: \.1) { seg in legend(seg.0, seg.1, cap > 0 && (seg.2 > 0 || seg.1 != "Applications") ? Int(seg.2) : nil) }
                     legend(Color(nsColor: .quaternaryLabelColor), "Free", cap > 0 ? Int(free) : nil)
                     Spacer()
@@ -535,11 +540,14 @@ struct DeviceDashboard: View {
                         VStack(alignment: .leading, spacing: 0) {
                             Text("Breakdown").font(.system(size: 13, weight: .medium)).padding(.top, 8).padding(.bottom, 6)
                             smallRow("Applications and their data", measured ? DeviceManager.gb(Int(appSum)) : (apps.measuring || apps.loading ? "measuring…" : "–"))
+                            smallRow("Music", s?.music != nil ? DeviceManager.gb(Int(music)) : "measuring…")
+                            smallRow("Messages", s?.messages != nil ? DeviceManager.gb(Int(messages)) : "measuring…")
                             smallRow("Photos and videos", DeviceManager.gb(Int(photos)))
+                            smallRow("Mail", s?.mail != nil ? DeviceManager.gb(Int(mail)) : "measuring…")
                             smallRow("iOS", system > 0 ? DeviceManager.gb(Int(system)) : "–")
                             smallRow("Free", DeviceManager.gb(Int(free)))
                             smallRow("Free after iOS clears caches", s.map { DeviceManager.gb($0.free) } ?? "–")
-                            Text("Music, Messages, Mail and System Data count in the iPhone's Settings but cannot be read over USB.")
+                            Text("System Data (caches, logs, Siri voices) counts in the iPhone's Settings but cannot be read over USB.")
                                 .font(.system(size: 11)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
                         }
                         VStack(alignment: .leading, spacing: 0) {
@@ -548,7 +556,7 @@ struct DeviceDashboard: View {
                             if !measured {
                                 Text(apps.measuring || apps.loading ? "Measuring…" : "Open Apps to measure").font(.system(size: 12)).foregroundStyle(.secondary).frame(height: 26)
                             }
-                            ForEach(measured ? Array(apps.apps.prefix(6)) : []) { app in
+                            ForEach(measured ? Array(apps.apps.prefix(9)) : []) { app in
                                 HStack(spacing: 8) {
                                     if let img = apps.icons[app.bundleID] {
                                         Image(nsImage: img).resizable().frame(width: 18, height: 18).clipShape(RoundedRectangle(cornerRadius: 4))

@@ -25,12 +25,12 @@ confirmation in the UI.
 - **Blobs are sacred**: a blob already on disk is never requested again or overwritten (the app skips it and
   `decant-tss` refuses the path); saved blobs are made read-only and locked in Finder.
 
-## Open question: Music in the storage card
+## Storage card (verify with the phone)
 
-The iPhone's Settings shows a Music slice (about 20 GB on rkoh's phone) that Decant cannot find over USB: the
-system app com.apple.Music reports 0.58 GB of data, /iTunes_Control/Music is empty folders (nothing synced), and
-Apple Music downloads live in a container the USB services do not expose. Checked 2026-10-30; a folder walk of
-/Music, /Purchases, /Downloads, /Books, /Recordings was interrupted when the phone was unplugged. Resume there.
+Settings' Music slice turned out to be /Music on the Media partition (19.5 GB here; Apple Music downloads), not
+the Music app's container. `MediaUsage.folderBytes` walks /Music, /iTunes_Control and /Purchases over AFC once
+per connection; Messages and Mail come from the system apps' DynamicDiskUsage. Added 2026-10-30 evening without
+the phone attached: check the numbers against Settings → General → iPhone Storage next time it is plugged in.
 
 ## Next, in order
 
