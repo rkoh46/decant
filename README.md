@@ -65,8 +65,19 @@ Nothing is tied to a particular drive. Photos default to your Pictures folder, b
 
 ## Windows
 
-Not yet. Decant's engine pieces are portable, but the app itself is written against macOS frameworks, so the
-Windows version is a separate build on the roadmap rather than a port.
+Decant for Windows is a native WinUI 3 app with the same layout and the same engine rules as the Mac version. It
+runs on Windows 11 (ARM64 and x64) and covers the Device and Photos tabs for now: the phone as it is, battery
+and storage, and copying or moving the camera roll to any folder with the same byte-count check before a delete.
+
+| Mac | Windows |
+|---|---|
+| ![Device on Mac](docs/device.png) | ![Device on Windows](docs/windows-device.png) |
+| ![Backup on Mac](docs/backup.png) | ![Photos on Windows](docs/windows-photos.png) |
+
+It talks to the phone through the libimobiledevice tools and library, which need Apple's USB driver from the
+**Apple Devices** app (or iTunes). The source and build script are in [windows/](windows/README.md); it is built
+in a Windows 11 ARM virtual machine with `dotnet build`, no Visual Studio needed. No installer yet: unzip and run
+`Decant.exe`.
 
 ## Licence
 

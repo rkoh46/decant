@@ -1,0 +1,90 @@
+<UserControl
+    x:Class="Decant.Views.PhotosPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Decant.Views">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <!-- Sidebar: what to show -->
+        <Grid Background="{ThemeResource LayerOnMicaBaseAltFillColorDefaultBrush}" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,1,0">
+            <ListView x:Name="Filters" SelectionMode="Single" SelectionChanged="Filters_SelectionChanged" Padding="8,12" IsItemClickEnabled="False">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="MinHeight" Value="34" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="12,0" />
+                        <Setter Property="Margin" Value="0,1" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:FilterRow">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="{x:Bind Glyph}" FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,0,10,0" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1" Text="{x:Bind Title}" FontSize="13" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="2" Text="{x:Bind CountText}" FontSize="12" FontFamily="{StaticResource MonoFont}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Grid>
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="52" />
+            </Grid.RowDefinitions>
+            <!-- Grid toolbar -->
+            <Grid Padding="16,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
+                <TextBlock x:Name="Summary" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button Content="Select all" Click="SelectAll_Click" FontSize="12" Padding="10,3" />
+                    <Button Content="Select none" Click="SelectNone_Click" FontSize="12" Padding="10,3" />
+                </StackPanel>
+            </Grid>
+            <GridView x:Name="Items" Grid.Row="1" SelectionMode="Extended" Padding="12" SelectionChanged="Items_SelectionChanged" DoubleTapped="Items_DoubleTapped">
+                <GridView.ItemContainerStyle>
+                    <Style TargetType="GridViewItem">
+                        <Setter Property="Margin" Value="4" />
+                    </Style>
+                </GridView.ItemContainerStyle>
+                <GridView.ItemTemplate>
+                    <DataTemplate x:DataType="local:Tile">
+                        <Grid Width="114" Height="114" CornerRadius="4" Background="{ThemeResource ControlFillColorSecondaryBrush}">
+                            <Image Source="{x:Bind Thumb, Mode=OneWay}" Stretch="UniformToFill" />
+                            <Border Background="#99000000" CornerRadius="4" Padding="5,1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="4" Visibility="{x:Bind BadgeVisible}">
+                                <TextBlock Text="{x:Bind Badge}" FontSize="11" FontFamily="{StaticResource MonoFont}" Foreground="White" />
+                            </Border>
+                            <FontIcon Glyph="&#xE9D9;" FontSize="12" Foreground="White" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6" Visibility="{x:Bind LiveVisible}" />
+                        </Grid>
+                    </DataTemplate>
+                </GridView.ItemTemplate>
+            </GridView>
+            <StackPanel x:Name="EmptyGrid" Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8" Visibility="Collapsed">
+                <TextBlock x:Name="EmptyTitle" Text="No iPhone connected" FontSize="16" FontWeight="Medium" HorizontalAlignment="Center" />
+                <TextBlock x:Name="EmptyText" Text="The camera roll appears here once a phone is connected" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+            </StackPanel>
+            <!-- Bottom bar -->
+            <Grid Grid.Row="2" Background="{ThemeResource LayerOnMicaBaseAltFillColorDefaultBrush}" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="16,0">
+                <TextBlock x:Name="SelectionText" FontSize="13" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <StackPanel x:Name="ProgressPanel" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center" Visibility="Collapsed">
+                    <ProgressBar x:Name="Progress" Width="200" VerticalAlignment="Center" />
+                    <TextBlock x:Name="ProgressText" FontSize="13" VerticalAlignment="Center" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button x:Name="CancelButton" Content="Stop" Click="Cancel_Click" Visibility="Collapsed" />
+                    <Button x:Name="DeleteButton" Content="Delete from iPhone…" Click="Delete_Click" />
+                    <Button x:Name="MoveButton" Content="Move to PC…" Click="Move_Click" />
+                    <Button x:Name="CopyButton" Content="Copy to PC" Style="{StaticResource AccentButtonStyle}" Click="Copy_Click" />
+                </StackPanel>
+            </Grid>
+        </Grid>
+    </Grid>
+</UserControl>

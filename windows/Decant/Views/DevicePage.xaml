@@ -1,0 +1,163 @@
+<UserControl
+    x:Class="Decant.Views.DevicePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="52" />
+        </Grid.RowDefinitions>
+        <!-- Empty states: no tools, no phone. -->
+        <StackPanel x:Name="Empty" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8" MaxWidth="420" Visibility="Collapsed">
+            <FontIcon Glyph="&#xE8EA;" FontSize="40" Foreground="{ThemeResource TextFillColorTertiaryBrush}" HorizontalAlignment="Center" Margin="0,0,0,8" />
+            <TextBlock x:Name="EmptyTitle" Text="No iPhone connected" FontSize="22" FontWeight="Medium" HorizontalAlignment="Center" />
+            <TextBlock x:Name="EmptyText" Text="Connect the iPhone with a cable, unlock it, and tap Trust on the phone if it asks" TextWrapping="Wrap"
+                       TextAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock x:Name="EmptyDetail" Style="{StaticResource Caption}" TextWrapping="Wrap" TextAlignment="Center" FontFamily="{StaticResource MonoFont}" Visibility="Collapsed" />
+        </StackPanel>
+        <ScrollViewer x:Name="Content" Visibility="Collapsed">
+            <Grid Padding="24,24,24,8" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="272" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="16">
+                    <!-- The phone -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel HorizontalAlignment="Center" Spacing="4">
+                            <Grid Width="156" Height="322" Margin="0,4,0,12">
+                                <Border x:Name="Body" CornerRadius="28" BorderThickness="1" BorderBrush="#29FFFFFF">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                            <GradientStop Color="#1E1E20" Offset="0" />
+                                            <GradientStop Color="#0F0F10" Offset="1" />
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+                                <Border Margin="8" CornerRadius="21" Background="#000000">
+                                    <ItemsRepeater x:Name="Screen">
+                                        <ItemsRepeater.Layout>
+                                            <UniformGridLayout MinItemWidth="44" MinItemHeight="44" MinRowSpacing="1" MinColumnSpacing="1" MaximumRowsOrColumns="3" ItemsStretch="Uniform" />
+                                        </ItemsRepeater.Layout>
+                                        <ItemsRepeater.ItemTemplate>
+                                            <DataTemplate>
+                                                <Image Source="{Binding}" Stretch="UniformToFill" />
+                                            </DataTemplate>
+                                        </ItemsRepeater.ItemTemplate>
+                                    </ItemsRepeater>
+                                </Border>
+                                <Border x:Name="Island" Width="46" Height="13" CornerRadius="7" Background="#000000" VerticalAlignment="Top" Margin="0,18,0,0" />
+                            </Grid>
+                            <TextBlock x:Name="PhoneTitle" Text="iPhone" FontSize="15" FontWeight="Medium" HorizontalAlignment="Center" />
+                            <TextBlock x:Name="PhoneStatus" Text="Ready" Style="{StaticResource Caption}" HorizontalAlignment="Center" />
+                            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" Margin="0,12,0,0">
+                                <Button x:Name="RefreshButton" Content="Refresh" Click="Refresh_Click" />
+                                <Button x:Name="LogButton" Content="Log">
+                                    <Button.Flyout>
+                                        <Flyout x:Name="LogFlyout" Placement="Bottom">
+                                            <ScrollViewer x:Name="LogScroll" Width="460" MaxHeight="280">
+                                                <TextBlock x:Name="LogText" FontSize="12" FontFamily="{StaticResource MonoFont}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                            </ScrollViewer>
+                                        </Flyout>
+                                    </Button.Flyout>
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                    <!-- Battery -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel Spacing="8">
+                            <Grid>
+                                <TextBlock Text="Battery" Style="{StaticResource CardTitle}" />
+                                <TextBlock x:Name="BatteryState" Style="{StaticResource Caption}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                            </Grid>
+                            <Grid x:Name="BatteryTable" />
+                        </StackPanel>
+                    </Border>
+                    <!-- Tools -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Tools" Style="{StaticResource CardTitle}" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Restart" Click="Restart_Click" />
+                                <Button Content="Shut down" Click="ShutDown_Click" />
+                                <Button Content="Rename" Click="Rename_Click" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="16">
+                    <!-- Info -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel Spacing="12">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <TextBlock x:Name="ModelName" Text="iPhone" FontSize="22" FontWeight="Medium" />
+                                <TextBlock x:Name="Capacity" Text="" FontSize="15" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Bottom" Margin="0,0,0,3" />
+                            </StackPanel>
+                            <Grid ColumnSpacing="32">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid x:Name="InfoLeft" />
+                                <Grid x:Name="InfoRight" Grid.Column="1" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                    <!-- Storage -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel Spacing="12">
+                            <Grid>
+                                <TextBlock Text="Storage" Style="{StaticResource CardTitle}" />
+                                <TextBlock x:Name="StorageUsed" Style="{StaticResource Caption}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                            </Grid>
+                            <Border CornerRadius="4" Height="10" Background="{ThemeResource ControlStrongFillColorDisabledBrush}">
+                                <Grid x:Name="StorageBar" CornerRadius="4" />
+                            </Border>
+                            <StackPanel x:Name="Legend" Orientation="Horizontal" Spacing="16" />
+                            <Grid ColumnSpacing="32" Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Breakdown" FontSize="13" FontWeight="Medium" />
+                                    <Grid x:Name="Breakdown" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Spacing="8" x:Name="AppsPanel">
+                                    <TextBlock Text="Largest apps" FontSize="13" FontWeight="Medium" />
+                                    <Grid x:Name="AppsTable" />
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </ScrollViewer>
+        <!-- Bottom bar: where photos go, and the two actions. -->
+        <Grid Grid.Row="1" Background="{ThemeResource LayerOnMicaBaseAltFillColorDefaultBrush}" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+              BorderThickness="0,1,0,0" Padding="24,0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Photos go to" Style="{StaticResource Caption}" VerticalAlignment="Center" />
+            <StackPanel x:Name="DestPanel" Grid.Column="1" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                <TextBlock x:Name="DestPath" FontSize="13" VerticalAlignment="Center" />
+                <HyperlinkButton Content="Change…" Click="Change_Click" Padding="0" FontSize="13" />
+                <HyperlinkButton Content="Show in Explorer" Click="Reveal_Click" Padding="0" FontSize="13" />
+                <TextBlock x:Name="DestFree" Style="{StaticResource Caption}" VerticalAlignment="Center" />
+            </StackPanel>
+            <StackPanel x:Name="ProgressPanel" Grid.Column="1" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center" Visibility="Collapsed">
+                <ProgressBar x:Name="Progress" Width="200" VerticalAlignment="Center" />
+                <TextBlock x:Name="ProgressText" FontSize="13" VerticalAlignment="Center" />
+            </StackPanel>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button x:Name="CancelButton" Content="Stop" Click="Cancel_Click" Visibility="Collapsed" />
+                <Button x:Name="MoveAll" Content="Move All to PC…" Click="MoveAll_Click" />
+                <Button x:Name="CopyAll" Content="Copy All to PC" Style="{StaticResource AccentButtonStyle}" Click="CopyAll_Click" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</UserControl>
