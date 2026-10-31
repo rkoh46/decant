@@ -420,11 +420,31 @@ final class DeviceManager: NSObject, ObservableObject {
     var totalBytes: Int { items.reduce(0) { $0 + $1.size } }
     var selectedBytes: Int { items.filter { selection.contains($0.id) }.reduce(0) { $0 + $1.size } }
 
+    private var pendingLog: [String] = []
+    private var logFlushScheduled = false
+
+    /// Lines are published in batches a few times a second: a run that fails thousands of items in a row (the
+    /// destination drive vanished) must not drive one SwiftUI update per line. That storm, with the Log window
+    /// open, hit a main-menu assertion inside SwiftUI on macOS 26 and took the app down mid-move.
     func addLog(_ line: String) {
         let t = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
-        log.append("\(t)  \(line)")
         NSLog("%@", line)                       // mirrored to the system log for diagnosis
-        if log.count > 2000 { log.removeFirst(log.count - 2000) }
+        let entry = "\(t)  \(line)"
+        if Thread.isMainThread { pendingLog.append(entry); scheduleLogFlush() }
+        else { DispatchQueue.main.async { self.pendingLog.append(entry); self.scheduleLogFlush() } }
+    }
+
+    private func scheduleLogFlush() {
+        guard !logFlushScheduled else { return }
+        logFlushScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self else { return }
+            self.logFlushScheduled = false
+            guard !self.pendingLog.isEmpty else { return }
+            self.log.append(contentsOf: self.pendingLog)
+            self.pendingLog.removeAll()
+            if self.log.count > 2000 { self.log.removeFirst(self.log.count - 2000) }
+        }
     }
 
     // MARK: Offload
@@ -440,8 +460,17 @@ final class DeviceManager: NSObject, ObservableObject {
         Task { @MainActor in
             let fm = FileManager.default
             var copied = 0, skipped = 0, failed = 0
+            var lost = false
             for item in targets {
                 if cancelled { addLog("Stopped by user"); break }
+                // The destination can vanish mid-run (a bus-powered drive dropping off USB). Stop at once, mark the
+                // rest untouched, and delete nothing: the copies already verified are on that drive.
+                if !fm.fileExists(atPath: opts.destination.path) {
+                    lost = true; cancelled = true
+                    addLog("STOPPED: \(opts.destination.path) disappeared; nothing more is copied and nothing is deleted from the iPhone")
+                    for rest in targets where rest.status == .pending || rest.status == .copying { rest.status = .failed("destination disappeared") }
+                    break
+                }
                 let dir = opts.byDate ? Self.dateFolder(opts.destination, item.date) : opts.destination
                 try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
                 let target = dir.appendingPathComponent(item.name)
@@ -478,7 +507,8 @@ final class DeviceManager: NSObject, ObservableObject {
             if skipped > 0 { parts.append("\(skipped) were already there") }
             if failed > 0 { parts.append("\(failed) failed") }
             if deleted > 0 { parts.append("\(deleted) deleted from the iPhone") }
-            if cancelled { parts.insert("Stopped", at: 0) }
+            if lost { parts.insert("Stopped: the destination drive disappeared", at: 0) }
+            else if cancelled { parts.insert("Stopped", at: 0) }
             summary = parts.joined(separator: " · ")
             running = false
         }
