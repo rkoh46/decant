@@ -473,13 +473,21 @@ final class DeviceManager: NSObject, ObservableObject {
                 }
                 let dir = opts.byDate ? Self.dateFolder(opts.destination, item.date) : opts.destination
                 try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-                let target = dir.appendingPathComponent(item.name)
+                var target = dir.appendingPathComponent(item.name)
                 if opts.skipExisting, Self.size(of: target) == item.size {
                     item.status = .alreadyCopied; skipped += 1
                 } else {
+                    // A different file with the same name (the phone's numbering restarted, or an earlier copy of
+                    // another photo) is never overwritten: the new one is saved as "IMG_0001 (2).HEIC".
+                    var saveAs: String? = nil
+                    if fm.fileExists(atPath: target.path) {
+                        target = Self.freeName(in: dir, for: item.name)
+                        saveAs = target.lastPathComponent
+                        addLog("\(item.name) already exists with a different size; saving as \(saveAs!)")
+                    }
                     item.status = .copying
                     guard let file = item.file else { item.status = .failed("sample item"); failed += 1; progress.done += 1; continue }
-                    switch await download(file, to: dir) {
+                    switch await download(file, to: dir, saveAs: saveAs) {
                     case .failure(let error):
                         item.status = .failed(error.localizedDescription); failed += 1
                         addLog("FAILED \(item.name): \(error.localizedDescription)")
@@ -514,9 +522,11 @@ final class DeviceManager: NSObject, ObservableObject {
         }
     }
 
-    private func download(_ file: ICCameraFile, to dir: URL, sidecars: Bool = true) async -> Result<Void, Error> {
-        await withCheckedContinuation { cont in
-            file.requestDownload(options: [.downloadsDirectoryURL: dir, .overwrite: true, .sidecarFiles: sidecars]) { _, error in
+    private func download(_ file: ICCameraFile, to dir: URL, sidecars: Bool = true, saveAs: String? = nil) async -> Result<Void, Error> {
+        var options: [ICDownloadOption: Any] = [.downloadsDirectoryURL: dir, .overwrite: true, .sidecarFiles: sidecars]
+        if let saveAs { options[.saveAsFilename] = saveAs }
+        return await withCheckedContinuation { cont in
+            file.requestDownload(options: options) { _, error in
                 DispatchQueue.main.async {
                     if let error { cont.resume(returning: .failure(error)) } else { cont.resume(returning: .success(())) }
                 }
@@ -885,6 +895,17 @@ final class DeviceManager: NSObject, ObservableObject {
 
     private static let yearFmt: DateFormatter = { let f = DateFormatter(); f.dateFormat = "yyyy"; return f }()
     private static let monthFmt: DateFormatter = { let f = DateFormatter(); f.dateFormat = "yyyy-MM"; return f }()
+
+    /// "IMG_0001.HEIC" -> the first of "IMG_0001 (2).HEIC", "IMG_0001 (3).HEIC"… that does not exist in `dir`.
+    static func freeName(in dir: URL, for name: String) -> URL {
+        let base = (name as NSString).deletingPathExtension, ext = (name as NSString).pathExtension
+        var n = 2
+        while true {
+            let candidate = dir.appendingPathComponent(ext.isEmpty ? "\(base) (\(n))" : "\(base) (\(n)).\(ext)")
+            if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+            n += 1
+        }
+    }
 
     static func dateFolder(_ root: URL, _ date: Date?) -> URL {
         guard let date else { return root.appendingPathComponent("Undated") }
