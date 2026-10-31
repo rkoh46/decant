@@ -1,12 +1,13 @@
 import SwiftUI
 import ImageCaptureCore
+import Charts
 
 // MARK: - Tools: a list of tools on the left, the chosen tool with its own content on the right
 
 enum Tool: String, CaseIterable, Identifiable {
     case restart, shutDown, enterRecovery, exitRecovery
     case rename, identifiers, report, unpair
-    case crashReports, systemLog, screenshot, battery
+    case crashReports, systemLog, screenshot, battery, diagnostics
     case appLog, reread
     var id: String { rawValue }
 
@@ -24,6 +25,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .systemLog: return "System Log"
         case .screenshot: return "Screenshot"
         case .battery: return "Battery"
+        case .diagnostics: return "Diagnostics"
         case .appLog: return "Decant Log"
         case .reread: return "Re-read Library"
         }
@@ -43,6 +45,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .systemLog: return "text.alignleft"
         case .screenshot: return "camera.viewfinder"
         case .battery: return "battery.75percent"
+        case .diagnostics: return "stethoscope"
         case .appLog: return "doc.text"
         case .reread: return "arrow.clockwise"
         }
@@ -61,7 +64,8 @@ enum Tool: String, CaseIterable, Identifiable {
         case .crashReports: return "Copies the phone's crash logs to a folder on the Mac, for reading or for sending to a developer."
         case .systemLog: return "The phone's live system log, the same stream Console shows, with a filter."
         case .screenshot: return "Captures the phone's screen into your Pictures folder. iOS 17 and later require Developer Mode (Settings → Privacy & Security)."
-        case .battery: return "What the phone's battery reports about itself."
+        case .battery: return "What the phone's battery reports about itself, and how its health and cycle count have moved since Decant first saw it."
+        case .diagnostics: return "The phone's own self-tests (battery gauge, storage, Wi-Fi) and what it is drawing from the charger right now."
         case .appLog: return "Everything Decant did in this session, with times."
         case .reread: return "Reads the camera roll again from the open connection, without reconnecting."
         }
@@ -70,7 +74,7 @@ enum Tool: String, CaseIterable, Identifiable {
     static let sections: [(String, [Tool])] = [
         ("Power", [.restart, .shutDown, .enterRecovery, .exitRecovery]),
         ("Device", [.rename, .identifiers, .report, .unpair]),
-        ("Diagnostics", [.crashReports, .systemLog, .screenshot, .battery]),
+        ("Diagnostics", [.battery, .diagnostics, .crashReports, .systemLog, .screenshot]),
         ("Decant", [.appLog, .reread]),
     ]
 }
@@ -78,7 +82,7 @@ enum Tool: String, CaseIterable, Identifiable {
 struct ToolsPane: View {
     @EnvironmentObject var manager: DeviceManager
     @EnvironmentObject var firmware: FirmwareService
-    @State private var selected: Tool? = .battery
+    @State private var selected: Tool? = Tool(rawValue: ProcessInfo.processInfo.environment["DECANT_TOOL"] ?? "") ?? .battery   // screenshot aid
     let showLog: () -> Void
 
     var body: some View {
@@ -214,11 +218,15 @@ struct ToolDetail: View {
                     row("Cycle count", b.cycleCount.map { $0.formatted() } ?? "–")
                     row("Design capacity", b.designCapacity.map { "\($0.formatted()) mAh" } ?? "–")
                     row("Current full capacity", b.maxCapacity.map { "\($0.formatted()) mAh" } ?? "–")
+                    row("Temperature", b.temperature.map { String(format: "%.1f °C", $0) } ?? "–")
                 }
                 Text("Apple replaces batteries under warranty below 80% health. Figures refresh every 30 seconds while connected.").font(.caption).foregroundStyle(.secondary)
+                BatteryHistoryView(samples: manager.batteryHistory)
             } else {
                 Text("Connect an iPhone to read its battery").foregroundStyle(.secondary)
             }
+        case .diagnostics:
+            DiagnosticsView().environmentObject(manager)
         case .appLog:
             LogView().environmentObject(manager)
                 .frame(height: 440)
@@ -422,6 +430,143 @@ extension DeviceManager {
                 lastScreenshotError = "Screenshot failed: \(output.trimmingCharacters(in: .whitespaces)). On iOS 17 and later, turn on Developer Mode in Settings → Privacy & Security, then try again."
                 addLog(lastScreenshotError!)
             }
+        }
+    }
+}
+
+// MARK: - Battery history: one sample per connection and per hour on the cable, kept per phone
+
+struct BatteryHistoryView: View {
+    let samples: [BatterySample]
+
+    private var health: [BatterySample] { samples.filter { $0.health != nil } }
+    private var span: String {
+        guard let a = samples.first?.date, let b = samples.last?.date else { return "" }
+        let days = Int(b.timeIntervalSince(a) / 86400)
+        return days < 1 ? "today" : days < 60 ? "\(days) days" : "\(days / 30) months"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("History").font(.system(size: 13, weight: .medium))
+                Spacer()
+                Text(samples.count < 2 ? "Builds up as the phone connects" : "\(samples.count) readings over \(span)").font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
+            }
+            .padding(.top, 8)
+            if health.count >= 2 {
+                HStack(alignment: .top, spacing: 24) {
+                    chart("Health", unit: "%", values: health.map { ($0.date, $0.health!) }, domain: healthDomain)
+                    chart("Cycles", unit: "", values: health.compactMap { s in s.cycleCount.map { (s.date, Double($0)) } }, domain: nil)
+                }
+                if let first = health.first?.health, let last = health.last?.health {
+                    Text(String(format: "%.0f%% health when Decant first saw this phone, %.0f%% now · %@ cycles",
+                                first, last, (health.last?.cycleCount).map { $0.formatted() } ?? "–"))
+                        .font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
+                }
+            } else {
+                Text("Each time the iPhone connects, Decant notes its health and cycle count here. After a few weeks the trend shows whether the battery is ageing normally (about 1% of health per 25 cycles is typical).")
+                    .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var healthDomain: ClosedRange<Double> {
+        let v = health.map { $0.health! }
+        return (max(0, (v.min() ?? 80) - 5)).rounded(.down)...min(100, (v.max() ?? 100) + 1)
+    }
+
+    /// One quiet line per chart; the latest reading is the only point drawn.
+    private func chart(_ title: String, unit: String, values: [(Date, Double)], domain: ClosedRange<Double>?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(title).font(.system(size: 12)).foregroundStyle(.secondary)
+                if let last = values.last { Text(String(format: unit == "%" ? "%.0f%%" : "%.0f", last.1)).font(.system(size: 12, weight: .medium)).monospacedDigit() }
+            }
+            Chart {
+                ForEach(Array(values.enumerated()), id: \.offset) { _, v in
+                    LineMark(x: .value("Date", v.0), y: .value(title, v.1)).foregroundStyle(Color(nsColor: .secondaryLabelColor)).lineStyle(StrokeStyle(lineWidth: 1.5)).interpolationMethod(.monotone)
+                }
+                if let last = values.last {
+                    PointMark(x: .value("Date", last.0), y: .value(title, last.1)).foregroundStyle(Color.accentColor).symbolSize(28)
+                }
+            }
+            .chartYScale(domain: .automatic(includesZero: false))
+            .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) { _ in AxisGridLine().foregroundStyle(.quaternary); AxisValueLabel(format: .dateTime.month(.abbreviated).year(.twoDigits)).font(.system(size: 10)) } }
+            .chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { _ in AxisGridLine().foregroundStyle(.quaternary); AxisValueLabel().font(.system(size: 10)) } }
+            .frame(height: 120)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Diagnostics: the phone's self-tests plus live charging figures
+
+struct DiagnosticsView: View {
+    @EnvironmentObject var manager: DeviceManager
+
+    private var gauge: [String: Any] { manager.diagnostics?["GasGauge"] as? [String: Any] ?? [:] }
+    private func status(_ key: String) -> String? {
+        guard let d = manager.diagnostics?[key] as? [String: Any] else { return nil }
+        let st = d["Status"] as? String ?? ""
+        if key == "WiFi", let a = d["Active"] as? String { return "\(st == "Success" ? "Passed" : st) · \(a == "YES" ? "active" : "inactive")" }
+        if key == "HDMI", let c = d["Connection"] as? String { return c == "No" ? "Nothing connected" : "Connected" }
+        return st == "Success" ? "Passed" : st.isEmpty ? nil : st
+    }
+
+    var body: some View {
+        let b = manager.battery
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Charging").font(.system(size: 13, weight: .medium)).padding(.bottom, 6)
+                row("State", b?.charging == true ? "Charging" : b?.externalConnected == true ? "Plugged in, not charging" : b?.charging == false ? "On battery" : "–")
+                row("Charger", b?.adapterWatts.map { "\($0) W" + (b?.adapterName.map { " · \($0)" } ?? "") } ?? (b?.externalConnected == false ? "None" : "–"))
+                row("Power now", b?.watts.map { abs($0) < 0.05 ? "Idle" : String(format: "%.1f W %@", abs($0), $0 > 0 ? "into the battery" : "from the battery") } ?? "–")
+                row("Voltage", b?.voltage.map { String(format: "%.2f V", $0) } ?? "–")
+                row("Current", b?.amperage.map { String(format: "%.2f A", $0) } ?? "–")
+                row("Temperature", b?.temperature.map { String(format: "%.1f °C", $0) } ?? "–")
+            }
+            Text("A 20 W charger on a good cable shows 15 to 20 W into the battery below 80%. A few watts means a weak cable, a USB-A port or a hot phone.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("Self-tests").font(.system(size: 13, weight: .medium))
+                    Spacer()
+                    Button("Run Again") { manager.runDiagnostics() }.controlSize(.small).disabled(manager.device == nil || manager.running)
+                }
+                .padding(.bottom, 6)
+                row("Battery gauge", status("GasGauge") ?? "–")
+                row("Gauge cycle count", (gauge["CycleCount"] as? Int).map { $0.formatted() } ?? "–")
+                row("Gauge full charge", (gauge["FullChargeCapacity"] as? Int).map { "\($0.formatted()) mAh" } ?? "–")
+                row("Storage (NAND)", status("NAND") ?? "–")
+                row("Wi-Fi", status("WiFi") ?? "–")
+                row("Video out", status("HDMI") ?? "–")
+            }
+            Text(manager.diagnostics == nil ? "The self-tests run when the phone connects." : "These are the checks iOS runs on itself; Decant only asks for the results. Deeper storage or logic-board diagnostics need Apple's tools.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label).foregroundStyle(.secondary).frame(width: 160, alignment: .leading)
+            Text(value).fontWeight(.medium).monospacedDigit()
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 13))
+        .frame(height: 32)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+}
+
+extension DeviceManager {
+    func runDiagnostics() {
+        guard let udid = Lockdown.cachedUDID else { return }
+        if Demo.on { diagnostics = Demo.diagnostics(); addLog("Self-tests passed"); return }
+        addLog("Running the phone's self-tests")
+        Task.detached { [weak self] in
+            let d = Lockdown.plist("idevicediagnostics", ["-u", udid, "diagnostics", "All"])
+            await MainActor.run { self?.diagnostics = d; self?.addLog(d == nil ? "Self-tests did not answer" : "Self-tests finished") }
         }
     }
 }

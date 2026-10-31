@@ -22,6 +22,19 @@ confirmation in the UI.
   install a signed .ipa by button or drag and drop.
 - **Files**: AFC browser over the Media root and every app that allows file sharing (house_arrest, `/Documents`):
   download, upload, new folder, delete. On My iPhone and iCloud Drive are not reachable over USB.
+- **Backup browser**: any backup (Decant, Finder, iTunes; encrypted ones with their password) opens in the
+  Backup tab with counts of messages, contacts, calls, notes, voice memos, Safari history and WhatsApp chats,
+  each exportable as plain files (`Sources/BackupBrowser.swift`: Manifest.db, keybag unwrap, per-file AES).
+  Verified against a synthetic fixture with the real iOS schemas; the encrypted path only through its
+  primitives (no encrypted test backup yet).
+- **Backup settings**: encryption on/off/change password (`idevicebackup2 encryption`, `changepw`), Wi-Fi sync
+  (`idevicepair wifi`), backups over the network (`idevicebackup2 -n`) when the phone is listed by `idevice_id -n`.
+- **Ringtones** (Files tab): any audio or video cut to 30/40 s AAC, uploaded to /iTunes_Control/Ringtones with
+  the Ringtones.plist entry. Untested on a phone as of 2026-10-31.
+- **Battery history**: one sample per connection and per hour on the cable, in Application Support/Decant/Battery;
+  charted in Tools → Battery. **Diagnostics** tool: charging watts (AdapterDetails, InstantAmperage), the
+  phone's self-tests (`idevicediagnostics diagnostics All`).
+- **Demo mode** `DECANT_DEMO=1`: a sample iPhone built from the Mac's wallpapers and Apple apps, for screenshots.
 - **Blobs are sacred**: a blob already on disk is never requested again or overwritten (the app skips it and
   `decant-tss` refuses the path); saved blobs are made read-only and locked in Finder.
 

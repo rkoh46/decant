@@ -330,17 +330,18 @@ struct DeviceDashboard: View {
     // The cards fill the window; the photo destination is a fixed footer like the bottom bar on the other tabs.
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                HStack(alignment: .top, spacing: 16) {
-                    phoneCard.frame(width: 272)
-                    VStack(spacing: 16) {
-                        infoCard
-                        storageCard
+            GeometryReader { g in
+                ScrollView {
+                    HStack(alignment: .top, spacing: 16) {
+                        phoneCard.frame(width: 272)
+                        VStack(spacing: 16) {
+                            infoCard
+                            storageCard
+                        }
                     }
+                    .padding(24)
+                    .frame(maxWidth: .infinity, minHeight: g.size.height, alignment: .top)
                 }
-                .padding(24)
-                .frame(maxWidth: .infinity, minHeight: 0, alignment: .top)
-                .containerRelativeFrame(.vertical) { h, _ in max(h, 420) }
             }
             Divider()
             photosRow
@@ -386,9 +387,18 @@ struct DeviceDashboard: View {
             smallRow("Level", b?.level.map { "\($0)%" })
             smallRow("Health", b?.health.map { String(format: "%.0f%%", $0) })
             smallRow("Cycles", b?.cycleCount.map { $0.formatted() })
-            smallRow("Voltage", b?.voltage.map { String(format: "%.2f V", $0) })
             smallRow("Capacity", (b?.maxCapacity).flatMap { m in b?.designCapacity.map { "\(m) of \($0) mAh" } })
+            smallRow("Power", powerText)
+            smallRow("Charger", b?.adapterWatts.map { "\($0) W" + (b?.adapterName.map { " · \($0)" } ?? "") } ?? (b?.externalConnected == false ? "None" : nil))
+            smallRow("Temperature", b?.temperature.map { String(format: "%.0f °C", $0) })
         }
+    }
+
+    /// Watts into the battery while charging, out of it on battery; the figure that shows a weak cable or charger.
+    private var powerText: String? {
+        guard let b = manager.battery, let w = b.watts else { return manager.battery?.voltage.map { String(format: "%.2f V", $0) } }
+        if abs(w) < 0.05 { return "Idle" }
+        return String(format: "%.1f W %@", abs(w), w > 0 ? "in" : "out")
     }
 
     private func smallRow(_ label: String, _ value: String?) -> some View {
@@ -530,8 +540,8 @@ struct DeviceDashboard: View {
                 }
                 .frame(height: 12)
                 HStack(spacing: 16) {
-                    ForEach(segments, id: \.1) { seg in legend(seg.0, seg.1, cap > 0 && (seg.2 > 0 || seg.1 != "Applications") ? Int(seg.2) : nil) }
-                    legend(Color(nsColor: .quaternaryLabelColor), "Free", cap > 0 ? Int(free) : nil)
+                    ForEach(segments, id: \.1) { seg in legend(seg.0, seg.1) }
+                    legend(Color(nsColor: .quaternaryLabelColor), "Free")
                     Spacer()
                 }
                 .font(.system(size: 12))
@@ -579,13 +589,15 @@ struct DeviceDashboard: View {
         .onChange(of: manager.catalogComplete) { ok in
             if ok, apps.apps.isEmpty, !apps.loading, let u = Lockdown.cachedUDID { Task { await apps.load(udid: u, includeSystem: false) } }
         }
+        .onAppear {
+            if manager.catalogComplete, apps.apps.isEmpty, !apps.loading, let u = Lockdown.cachedUDID { Task { await apps.load(udid: u, includeSystem: false) } }
+        }
     }
 
-    private func legend(_ color: Color, _ label: String, _ bytes: Int?) -> some View {
+    private func legend(_ color: Color, _ label: String) -> some View {
         HStack(spacing: 6) {
             Circle().fill(color).frame(width: 8, height: 8)
             Text(label).foregroundStyle(.secondary)
-            Text(bytes.map(DeviceManager.gb) ?? "–").monospacedDigit()
         }
     }
 
@@ -1271,7 +1283,7 @@ struct ThumbCell: View {
         .opacity(item.status == .deleted ? 0.3 : 1)
         .onHover { hovering = $0 }
         .help(item.name)
-        .onAppear { if item.thumbnail == nil && item.thumbnailTries <= 4 { item.file.requestThumbnail() } }
+        .onAppear { if item.thumbnail == nil && item.thumbnailTries <= 4 { item.file?.requestThumbnail() } }
     }
 
     @ViewBuilder private var statusBadge: some View {

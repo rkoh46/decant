@@ -173,6 +173,65 @@ final class BackupService: ObservableObject {
     @Published var finderBackups: [BackupInfo] = []
     @Published var finderBackupsReadable = true
 
+    // The phone's own backup settings (read over lockdown; changed only through the buttons in the Backup tab).
+    @Published var willEncrypt: Bool?          // com.apple.mobile.backup WillEncrypt: Health, passwords and Wi-Fi are in the backup
+    @Published var wifiSync: Bool?             // com.apple.mobile.wireless_lockdown EnableWifiConnections: backups without the cable
+    @Published var settingsFor = ""            // udid the settings belong to
+
+    func readSettings(udid: String) async {
+        guard !udid.isEmpty else { return }
+        if Demo.on { willEncrypt = true; wifiSync = true; settingsFor = udid; return }
+        let enc = await Task.detached { Lockdown.run("ideviceinfo", ["-u", udid, "-q", "com.apple.mobile.backup", "-k", "WillEncrypt"]) }.value
+        let wifi = await Task.detached { Lockdown.run("ideviceinfo", ["-u", udid, "-q", "com.apple.mobile.wireless_lockdown", "-k", "EnableWifiConnections"]) }.value
+        func bool(_ d: Data?) -> Bool? {
+            guard let d, let s = String(data: d, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else { return nil }
+            return s == "true" ? true : s == "false" ? false : nil
+        }
+        willEncrypt = bool(enc); wifiSync = bool(wifi); settingsFor = udid
+    }
+
+    /// Turn backup encryption on (password set on the phone; it asks for the passcode) or off (needs the current password).
+    func setEncryption(on: Bool, password: String, udid: String) async -> Bool {
+        guard !running else { return false }
+        running = true; phase = on ? "Turning on backup encryption" : "Turning off backup encryption"; progress = nil
+        defer { running = false }
+        if Demo.on { willEncrypt = on; phase = ""; return true }
+        var failed = false
+        let status = await Tools.stream("idevicebackup2", ["-u", udid, "encryption", on ? "on" : "off", password]) { [weak self] l in
+            self?.log(l); if l.localizedCaseInsensitiveContains("error") || l.localizedCaseInsensitiveContains("fail") { failed = true }
+        }
+        await readSettings(udid: udid)
+        let ok = status == 0 && !failed && willEncrypt == on
+        phase = ok ? "" : (on ? "Could not turn encryption on" : "Could not turn encryption off (wrong password?)")
+        return ok
+    }
+
+    func changePassword(old: String, new: String, udid: String) async -> Bool {
+        guard !running else { return false }
+        running = true; phase = "Changing the backup password"; progress = nil
+        defer { running = false }
+        if Demo.on { phase = ""; return true }
+        var failed = false
+        let status = await Tools.stream("idevicebackup2", ["-u", udid, "changepw", old, new]) { [weak self] l in
+            self?.log(l); if l.localizedCaseInsensitiveContains("error") || l.localizedCaseInsensitiveContains("fail") { failed = true }
+        }
+        let ok = status == 0 && !failed
+        phase = ok ? "" : "Could not change the password (wrong current password?)"
+        return ok
+    }
+
+    /// Wi-Fi sync: once on, the Mac reaches the phone over the LAN (usbmuxd lists it with `idevice_id -n`).
+    func setWifiSync(_ on: Bool, udid: String) async -> Bool {
+        guard !running else { return false }
+        running = true; phase = on ? "Allowing backups over Wi-Fi" : "Turning Wi-Fi backups off"; progress = nil
+        defer { running = false }
+        if Demo.on { wifiSync = on; phase = ""; return true }
+        let status = await Tools.stream("idevicepair", ["-u", udid, "wifi", on ? "on" : "off"]) { [weak self] in self?.log($0) }
+        await readSettings(udid: udid)
+        phase = status == 0 ? "" : "The phone did not accept the change"
+        return status == 0
+    }
+
     /// Describe one backup folder (the <UDID> folder, or a folder that contains one). Nil when it is not a backup.
     func info(for folder: URL) -> BackupInfo? {
         let fm = FileManager.default
@@ -204,6 +263,7 @@ final class BackupService: ObservableObject {
     }
 
     func scan(_ root: URL) {
+        if Demo.on { backups = Demo.backups(); finderBackups = Demo.finderBackups(); finderBackupsReadable = true; return }
         scanFinder()
         let fm = FileManager.default
         var found: [BackupInfo] = []
@@ -248,21 +308,21 @@ final class BackupService: ObservableObject {
         return total
     }
 
-    /// A full backup into <root>/<yyyy-MM-dd HHmm>/<UDID>. Encryption is turned on first when a password is given
-    /// (that is what makes Health data, saved passwords and Wi-Fi settings part of the backup).
-    func backup(udid: String, to root: URL, password: String?) async {
+    /// A full backup into <root>/<yyyy-MM-dd HHmm>/<UDID>. Whether it is encrypted is the phone's setting (see
+    /// setEncryption). `network` backs up over Wi-Fi instead of the cable.
+    func backup(udid: String, to root: URL, network: Bool = false) async {
         guard !running else { return }
         running = true; progress = 0; phase = "Preparing"
         let stamp = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HHmm"; return f.string(from: Date()) }()
         let dest = root.appendingPathComponent(stamp)
-        try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
-        log("Backup to \(dest.path)")
-        if let password, !password.isEmpty {
-            phase = "Turning on backup encryption"
-            await Tools.stream("idevicebackup2", ["-u", udid, "encryption", "on", password]) { [weak self] l in self?.log(l) }
+        if Demo.on {
+            for i in 1...20 { try? await Task.sleep(nanoseconds: 150_000_000); progress = Double(i) / 20; phase = "Backing up over \(network ? "Wi-Fi" : "USB")" }
+            phase = "Backup finished"; running = false; return
         }
-        phase = "Backing up"
-        let status = await Tools.stream("idevicebackup2", ["-u", udid, "backup", "--full", dest.path],
+        try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+        log("Backup to \(dest.path)\(network ? " over Wi-Fi" : "")")
+        phase = network ? "Backing up over Wi-Fi" : "Backing up"
+        let status = await Tools.stream("idevicebackup2", (network ? ["-n"] : []) + ["-u", udid, "backup", "--full", dest.path],
                                         register: { [weak self] p in self?.process = p }) { [weak self] l in
             guard let self else { return }
             if let pct = Tools.percent(in: l) { self.progress = pct } else { self.log(l) }
@@ -357,6 +417,7 @@ final class FirmwareService: ObservableObject {
 
     // Signing status from ipsw.me, which mirrors Apple's TSS answers per model.
     func loadSigning(productType: String) async {
+        if Demo.on { firmwares = Demo.firmwares(); for f in firmwares where f.signed { verdicts[f.buildid] = true }; return }
         guard let u = URL(string: "https://api.ipsw.me/v4/device/\(productType)?type=ipsw") else { return }
         struct Reply: Decodable { let firmwares: [Firmware] }
         do {
@@ -366,6 +427,7 @@ final class FirmwareService: ObservableObject {
     }
 
     func scanBlobs(root: URL, ecid: String) {
+        if Demo.on { blobs = Demo.blobs(); return }
         let dir = Self.blobDir(root, ecid: ecid)
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
         blobs = files.filter { $0.pathExtension == "shsh2" }.map { f in
@@ -384,6 +446,7 @@ final class FirmwareService: ObservableObject {
     @Published var verdicts: [String: Bool] = [:]
 
     func saveBlobs(ecid: String, productType: String, board: String, basebandSerial: String, basebandCert: String, root: URL, generator: String = FirmwareService.generator) async {
+        if Demo.on { phase = "Blobs already saved for 2 versions"; return }
         guard !running, Tools.has("decant-tss") else { log("The blob saver is missing from this build"); return }
         running = true; phase = "Saving SHSH blobs"; progress = nil
         let dir = Self.blobDir(root, ecid: ecid)
@@ -456,6 +519,7 @@ final class FirmwareService: ObservableObject {
     }
 
     func refreshMode() async {
+        if Demo.on { mode = .none; return }
         var out = ""
         guard Tools.has("irecovery") else { mode = .unavailable; return }
         let status = await Tools.stream("irecovery", ["-q"]) { out += $0 + "\n" }

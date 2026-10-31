@@ -35,6 +35,7 @@ final class AppsService: ObservableObject {
 
     /// Names first (instant), then sizes (the phone takes ~20 s to measure them) and icons in the background.
     func load(udid: String, includeSystem: Bool) async {
+        if Demo.on { apps = Demo.apps().sorted { $0.totalSize > $1.totalSize }; icons = Demo.icons(); return }
         loading = true
         defer { loading = false }
         guard let list = await Self.list(udid: udid, includeSystem: includeSystem,
@@ -296,10 +297,12 @@ struct RemoteEntry: Identifiable, Hashable {
 
 enum FileRoot: Hashable {
     case media
+    case ringtones                      // its own pane: the tones list, not a folder listing
     case appDocuments(String, String)   // bundle id, display name
     var title: String {
         switch self {
         case .media: return "Media"
+        case .ringtones: return "Ringtones"
         case .appDocuments(_, let name): return name
         }
     }
@@ -340,6 +343,7 @@ final class FilesService: ObservableObject {
     }
 
     func list(udid: String) async {
+        if Demo.on { entries = Demo.files(root: root, path: path); return }
         loading = true
         defer { loading = false }
         let out = await run(["ls -l \(quote(path))"], udid: udid)
@@ -433,6 +437,7 @@ struct FilesPane: View {
             List(selection: Binding(get: { files.root }, set: { r in files.root = r; files.path = files.homePath; selection = []; Task { await files.list(udid: udid) } })) {
                 Section("Locations") {
                     Label("Media", systemImage: "iphone").tag(FileRoot.media)
+                    Label("Ringtones", systemImage: "bell").tag(FileRoot.ringtones)
                 }
                 Section("App documents") {
                     ForEach(apps.apps.filter { $0.fileSharing }) { app in
@@ -446,6 +451,9 @@ struct FilesPane: View {
             .listStyle(.sidebar)
             .frame(width: 220)
             Divider()
+            if case .ringtones = files.root {
+                RingtonesPane().environmentObject(manager)
+            } else {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
                     Button { Task { await files.up(udid: udid) } } label: { Image(systemName: "chevron.left") }.disabled(files.path == files.homePath || files.loading)
@@ -534,8 +542,13 @@ struct FilesPane: View {
                 group.notify(queue: .main) { Task { await files.upload(urls, udid: udid) } }
                 return true
             }
+            }
         }
-        .onAppear { files.log = { [weak manager] in manager?.addLog($0) }; loadIfNeeded() }
+        .onAppear {
+            files.log = { [weak manager] in manager?.addLog($0) }
+            if ProcessInfo.processInfo.environment["DECANT_FILES"] == "ringtones" { files.root = .ringtones }   // screenshot aid
+            loadIfNeeded()
+        }
         .onChange(of: manager.catalogComplete) { _ in loadIfNeeded() }
         .alert("Delete \(selected.count) item\(selected.count == 1 ? "" : "s") from the iPhone?", isPresented: $confirmDelete) {
             Button("Delete", role: .destructive) { let s = selected; selection = []; Task { await files.delete(s, udid: udid) } }

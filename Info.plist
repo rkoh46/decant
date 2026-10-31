@@ -5,8 +5,8 @@
     <key>CFBundleName</key>            <string>Decant</string>
     <key>CFBundleDisplayName</key>     <string>Decant</string>
     <key>CFBundleIdentifier</key>      <string>local.decant</string>
-    <key>CFBundleVersion</key>         <string>0.9.0</string>
-    <key>CFBundleShortVersionString</key> <string>0.9.0</string>
+    <key>CFBundleVersion</key>         <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key> <string>1.0.0</string>
     <key>CFBundleExecutable</key>      <string>Decant</string>
     <key>CFBundleIconFile</key>        <string>Decant</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>

@@ -11,7 +11,7 @@ final class MediaItem: ObservableObject, Identifiable, Hashable {
         var isCopied: Bool { self == .verified || self == .alreadyCopied }
     }
 
-    let file: ICCameraFile
+    let file: ICCameraFile?          // nil only for sample items (DECANT_DEMO=1)
     let id: String
     let name: String
     let size: Int
@@ -23,6 +23,17 @@ final class MediaItem: ObservableObject, Identifiable, Hashable {
     @Published var thumbnail: CGImage?
     @Published var status: Status = .pending
     var thumbnailTries = 0
+
+    /// A sample item that never touches a phone (screenshots and the demo mode).
+    init(sample name: String, size: Int, date: Date, isVideo: Bool = false, isLivePhoto: Bool = false, duration: Double = 0,
+         pixelWidth: Int = 4032, pixelHeight: Int = 3024, thumbnail: CGImage?) {
+        file = nil
+        self.name = name; self.size = size; self.date = date
+        self.isVideo = isVideo; self.isLivePhoto = isLivePhoto; self.duration = duration
+        self.pixelWidth = pixelWidth; self.pixelHeight = pixelHeight
+        self.thumbnail = thumbnail
+        id = "\(name)|\(size)|\(date.timeIntervalSince1970)"
+    }
 
     init(_ file: ICCameraFile) {
         self.file = file
@@ -117,9 +128,60 @@ struct BatteryInfo {
     var cycleCount: Int?, designCapacity: Int?, maxCapacity: Int?
     var temperature: Double?    // °C
     var voltage: Double?        // V
+    var amperage: Double?       // A, positive while charging (InstantAmperage)
+    var adapterWatts: Int?      // what the charger offers (AdapterDetails.Watts)
+    var adapterName: String?    // "USB-C PD", "MagSafe", "USB" (AdapterDetails.Description / Name)
+    var externalConnected: Bool?
     var health: Double? {
         guard let d = designCapacity, let m = maxCapacity, d > 0 else { return nil }
         return Double(m) / Double(d) * 100
+    }
+    /// Power going into (or out of) the battery right now.
+    var watts: Double? {
+        guard let v = voltage, let a = amperage else { return nil }
+        return v * a
+    }
+}
+
+/// One battery reading kept on disk, so health and cycles can be followed over months.
+struct BatterySample: Codable, Identifiable {
+    var date: Date
+    var level: Int?, charging: Bool?, cycleCount: Int?, maxCapacity: Int?, designCapacity: Int?, temperature: Double?, voltage: Double?
+    var id: Date { date }
+    var health: Double? {
+        guard let d = designCapacity, let m = maxCapacity, d > 0 else { return nil }
+        return Double(m) / Double(d) * 100
+    }
+}
+
+/// Battery readings per phone in Application Support/Decant/Battery/<udid>.json: one sample when the phone connects
+/// and one an hour while it stays on the cable. Nothing else reads or writes the file.
+enum BatteryHistory {
+    static var dir: URL {
+        (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? FileManager.default.homeDirectoryForCurrentUser)
+            .appendingPathComponent("Decant/Battery")
+    }
+    static func url(_ udid: String) -> URL { dir.appendingPathComponent("\(udid).json") }
+
+    static func load(_ udid: String) -> [BatterySample] {
+        guard let d = try? Data(contentsOf: url(udid)) else { return [] }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        return (try? dec.decode([BatterySample].self, from: d)) ?? []
+    }
+
+    /// Appends when the last sample is older than an hour (or this is the first). Returns the stored series.
+    @discardableResult
+    static func record(_ b: BatteryInfo, udid: String) -> [BatterySample] {
+        guard !udid.isEmpty, b.cycleCount != nil || b.maxCapacity != nil else { return load(udid) }
+        var all = load(udid)
+        if let last = all.last, Date().timeIntervalSince(last.date) < 3600 { return all }
+        all.append(BatterySample(date: Date(), level: b.level, charging: b.charging, cycleCount: b.cycleCount, maxCapacity: b.maxCapacity,
+                                 designCapacity: b.designCapacity, temperature: b.temperature, voltage: b.voltage))
+        if all.count > 5000 { all.removeFirst(all.count - 5000) }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601; enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let d = try? enc.encode(all) { try? d.write(to: url(udid), options: .atomic) }
+        return all
     }
 }
 
@@ -150,10 +212,17 @@ enum Lockdown {
     /// Last UDID seen; views read this instead of spawning idevice_id on every body evaluation.
     nonisolated(unsafe) static var cachedUDID: String?
     static func firstUDID() -> String? {
+        if Demo.on { cachedUDID = Demo.udid; return Demo.udid }
         let u = run("idevice_id", ["-l"]).flatMap { String(data: $0, encoding: .utf8) }?
             .split(whereSeparator: \.isNewline).first.map(String.init)
         cachedUDID = u
         return u
+    }
+
+    /// Phones usbmuxd sees over the network (Wi-Fi sync on, same LAN, paired with this Mac).
+    static func networkUDIDs() -> [String] {
+        guard let d = run("idevice_id", ["-n"]), let s = String(data: d, encoding: .utf8) else { return [] }
+        return s.split(whereSeparator: \.isNewline).map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 }
 
@@ -170,6 +239,9 @@ final class DeviceManager: NSObject, ObservableObject {
     @Published var canDelete = true           // false when the phone withholds delete (iCloud Photos on)
     @Published var connectAttempts = 0        // watchdog retries of a session open that never completed
     @Published var lockdownSeesPhone = false  // cable side sees a phone the camera service has not announced yet
+    @Published var networkUDIDs: [String] = [] // phones reachable over Wi-Fi (paired with Wi-Fi sync on)
+    @Published var batteryHistory: [BatterySample] = []
+    @Published var diagnostics: [String: Any]?  // idevicediagnostics "All": gas gauge, NAND, Wi-Fi, HDMI self-tests
     @Published var lastReport: URL?
     @Published var lastCrashExport: (URL, Int)?
     @Published var lastScreenshot: URL?
@@ -197,13 +269,18 @@ final class DeviceManager: NSObject, ObservableObject {
         browser.delegate = self
         browser.browsedDeviceTypeMask = ICDeviceTypeMask(rawValue:
             ICDeviceTypeMask.camera.rawValue | ICDeviceLocationTypeMask.local.rawValue)!
+        if Demo.on { Demo.fill(self); return }
         browser.start()
         addLog("Waiting for an iPhone over USB…")
         presenceTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            guard let self, self.device == nil, Lockdown.available else { return }
+            guard let self, Lockdown.available else { return }
             Task.detached {
-                let seen = Lockdown.firstUDID() != nil
-                await MainActor.run { if self.lockdownSeesPhone != seen { self.lockdownSeesPhone = seen } }
+                let network = Lockdown.networkUDIDs()
+                let seen = self.device == nil ? Lockdown.firstUDID() != nil : true
+                await MainActor.run {
+                    if self.lockdownSeesPhone != seen { self.lockdownSeesPhone = seen }
+                    if self.networkUDIDs != network { self.networkUDIDs = network }
+                }
             }
         }
     }
@@ -273,7 +350,7 @@ final class DeviceManager: NSObject, ObservableObject {
         liveTimer?.invalidate(); liveTimer = nil
         if let d = device, d.hasOpenSession { d.requestCloseSession() }
         device = nil
-        info = nil; storage = nil; battery = nil; mediaUsage = nil
+        info = nil; storage = nil; battery = nil; mediaUsage = nil; batteryHistory = []; diagnostics = nil
         items = []; byFile = [:]; pendingAdds = []
         selection = []
         catalogComplete = false; sessionOpen = false; locked = false
@@ -297,7 +374,7 @@ final class DeviceManager: NSObject, ObservableObject {
         items = fresh; byFile = map; pendingAdds = []
         selection = selection.intersection(fresh.map { $0.id })
         catalogComplete = true
-        screenItems.forEach { if $0.thumbnail == nil { $0.file.requestThumbnail() } }
+        screenItems.forEach { if $0.thumbnail == nil { $0.file?.requestThumbnail() } }
         refreshLive()
         addLog("Library re-read: \(items.count) items")
     }
@@ -327,7 +404,8 @@ final class DeviceManager: NSObject, ObservableObject {
     func previewURL(for item: MediaItem) async -> URL? {
         if let u = previewCache[item.id], FileManager.default.fileExists(atPath: u.path) { return u }
         let url = Self.previewDir.appendingPathComponent(item.name)
-        if case .success = await download(item.file, to: Self.previewDir, sidecars: false), FileManager.default.fileExists(atPath: url.path) {
+        guard let file = item.file else { return nil }
+        if case .success = await download(file, to: Self.previewDir, sidecars: false), FileManager.default.fileExists(atPath: url.path) {
             previewCache[item.id] = url
             return url
         }
@@ -371,7 +449,8 @@ final class DeviceManager: NSObject, ObservableObject {
                     item.status = .alreadyCopied; skipped += 1
                 } else {
                     item.status = .copying
-                    switch await download(item.file, to: dir) {
+                    guard let file = item.file else { item.status = .failed("sample item"); failed += 1; progress.done += 1; continue }
+                    switch await download(file, to: dir) {
                     case .failure(let error):
                         item.status = .failed(error.localizedDescription); failed += 1
                         addLog("FAILED \(item.name): \(error.localizedDescription)")
@@ -487,7 +566,7 @@ final class DeviceManager: NSObject, ObservableObject {
         let ids = Set(gone.map { $0.id })
         items.removeAll { ids.contains($0.id) }
         selection.subtract(ids)
-        for g in gone { byFile[ObjectIdentifier(g.file)] = nil }
+        for g in gone { if let f = g.file { byFile[ObjectIdentifier(f)] = nil } }
     }
 
     private func deleteFromPhone(_ camera: ICCameraDevice, _ toDelete: [MediaItem]) async -> Int {
@@ -496,7 +575,7 @@ final class DeviceManager: NSObject, ObservableObject {
             let chunk = Array(toDelete[start..<min(start + 50, toDelete.count)])
             let failedItems: Set<ObjectIdentifier> = await withCheckedContinuation { cont in
                 var failedSet = Set<ObjectIdentifier>()
-                camera.requestDeleteFiles(chunk.map { $0.file }, deleteFailed: { failures in
+                camera.requestDeleteFiles(chunk.compactMap { $0.file }, deleteFailed: { failures in
                     for (_, item) in failures { failedSet.insert(ObjectIdentifier(item)) }
                 }, completion: { _, error in
                     DispatchQueue.main.async {
@@ -508,9 +587,10 @@ final class DeviceManager: NSObject, ObservableObject {
             // The phone announces removals itself; wait briefly for that rather than trusting the completion.
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             for item in chunk {
-                if failedItems.contains(ObjectIdentifier(item.file)) {
+                guard let file = item.file else { item.status = .failed("sample item"); continue }
+                if failedItems.contains(ObjectIdentifier(file)) {
                     item.status = .failed("phone refused to delete")
-                } else if removedByPhone.contains(ObjectIdentifier(item.file)) || item.status == .deleted {
+                } else if removedByPhone.contains(ObjectIdentifier(file)) || item.status == .deleted {
                     item.status = .deleted; deleted += 1
                 } else {
                     item.status = .failed("phone did not confirm the delete")
@@ -666,15 +746,35 @@ final class DeviceManager: NSObject, ObservableObject {
             for v in dict.values { if let r = find(key, in: v) { return r } }
             return nil
         }
+        func findAny(_ key: String, in any: Any?) -> Any? {
+            guard let dict = any as? [String: Any] else { return nil }
+            if let v = dict[key] { return v }
+            for v in dict.values { if let r = findAny(key, in: v) { return r } }
+            return nil
+        }
         var b = BatteryInfo()
         b.level = batt?["BatteryCurrentCapacity"] as? Int
         b.charging = batt?["BatteryIsCharging"] as? Bool
+        b.externalConnected = batt?["ExternalConnected"] as? Bool ?? findAny("ExternalConnected", in: diag) as? Bool
         b.cycleCount = find("CycleCount", in: diag)
         b.designCapacity = find("DesignCapacity", in: diag)
         b.maxCapacity = find("NominalChargeCapacity", in: diag) ?? find("AppleRawMaxCapacity", in: diag)
         if let t = find("Temperature", in: diag) { b.temperature = Double(t) / 100 }
         if let v = find("Voltage", in: diag) { b.voltage = Double(v) / 1000 }
-        if b.level != nil || b.cycleCount != nil { battery = b }
+        if let a = find("InstantAmperage", in: diag) ?? find("Amperage", in: diag) {
+            // IOKit reports a signed value that arrives as an unsigned 64-bit when negative (discharging).
+            let signed = a > Int(Int32.max) ? a - (1 << 32) : a
+            b.amperage = Double(signed) / 1000
+        }
+        if let adapter = findAny("AdapterDetails", in: diag) as? [String: Any] {
+            if let w = adapter["Watts"] as? Int, w > 0 { b.adapterWatts = w }
+            b.adapterName = adapter["Description"] as? String ?? adapter["Name"] as? String
+            if b.adapterName?.isEmpty ?? false { b.adapterName = nil }
+        }
+        if b.level != nil || b.cycleCount != nil {
+            battery = b
+            if let u = Lockdown.cachedUDID { batteryHistory = BatteryHistory.record(b, udid: u) }
+        }
     }
 
     private func applyDisk(_ d: [String: Any]?) {
@@ -695,8 +795,10 @@ final class DeviceManager: NSObject, ObservableObject {
             let batt = Lockdown.plist("ideviceinfo", args + ["-x", "-q", "com.apple.mobile.battery"])
             let disk = Lockdown.plist("ideviceinfo", args + ["-x", "-q", "com.apple.disk_usage.factory"])
             let diag = Lockdown.plist("idevicediagnostics", args + ["ioregentry", "AppleSmartBattery"])
+            let selfTests = Lockdown.plist("idevicediagnostics", args + ["diagnostics", "All"])
             await MainActor.run {
                 guard let self else { return }
+                self.diagnostics = selfTests
                 if let g = general {
                     var inf = DeviceInfo()
                     inf.manufacturer = "Apple"
@@ -835,8 +937,8 @@ extension DeviceManager: ICCameraDeviceDelegate {
         removedByPhone.formUnion(gone)
         for case let f as ICCameraFile in items { pendingICloudDeletes[MediaItem(f).id] = nil }   // the phone caught up
         for k in gone { byFile[k]?.status = .deleted }
-        self.selection.subtract(self.items.filter { gone.contains(ObjectIdentifier($0.file)) }.map { $0.id })
-        self.items.removeAll { gone.contains(ObjectIdentifier($0.file)) }
+        self.selection.subtract(self.items.filter { $0.file.map { gone.contains(ObjectIdentifier($0)) } ?? false }.map { $0.id })
+        self.items.removeAll { $0.file.map { gone.contains(ObjectIdentifier($0)) } ?? false }
         for k in gone { byFile[k] = nil }
     }
 
@@ -868,7 +970,7 @@ extension DeviceManager: ICCameraDeviceDelegate {
         if info == nil { queryDetails(device) }
         catalogComplete = true
         selection = []                      // nothing selected until the user chooses
-        screenItems.forEach { if $0.thumbnail == nil { $0.file.requestThumbnail() } }
+        screenItems.forEach { if $0.thumbnail == nil { $0.file?.requestThumbnail() } }
         addLog("Library read: \(photoCount) photos, \(videoCount) videos (\(liveCount) Live Photos), \(Self.gb(totalBytes))")
     }
 

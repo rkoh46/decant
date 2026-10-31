@@ -2,23 +2,99 @@ import SwiftUI
 
 // MARK: - Backup & Restore
 
+/// Opens one backup for browsing: counts what it holds, unlocks an encrypted one, exports readable files.
+@MainActor
+final class BackupBrowserModel: ObservableObject {
+    @Published var backup: BackupInfo?
+    @Published var summary: BackupSummary?
+    @Published var needsPassword = false
+    @Published var error: String?
+    @Published var busy = false
+    @Published var phase = ""
+    @Published var lastExport: (URL, Int)?
+    private var reader: BackupReader?
+
+    func open(_ b: BackupInfo) {
+        guard b != backup else { return }
+        close()
+        backup = b; summary = nil; error = nil; needsPassword = false; lastExport = nil
+        if Demo.on { summary = Demo.summary(); return }
+        busy = true; phase = "Reading the backup"
+        Task.detached { [folder = b.url] in
+            do {
+                let r = try BackupReader(folder: folder)
+                let s = r.isUnlocked ? try r.summary() : nil
+                await MainActor.run { self.reader = r; self.summary = s; self.needsPassword = !r.isUnlocked; self.busy = false; self.phase = "" }
+            } catch {
+                await MainActor.run { self.error = "\(error)"; self.busy = false; self.phase = "" }
+            }
+        }
+    }
+
+    func unlock(_ password: String) {
+        guard let r = reader, !password.isEmpty else { return }
+        busy = true; phase = "Unlocking"; error = nil
+        Task.detached {
+            do {
+                try r.unlock(password: password)
+                let s = try r.summary()
+                await MainActor.run { self.summary = s; self.needsPassword = false; self.busy = false; self.phase = "" }
+            } catch {
+                await MainActor.run { self.error = "\(error)"; self.busy = false; self.phase = "" }
+            }
+        }
+    }
+
+    func export(_ kinds: [BackupExport], to folder: URL, log: @escaping (String) -> Void) {
+        busy = true; phase = "Exporting"; error = nil; lastExport = nil
+        if Demo.on {
+            Task { try? await Task.sleep(nanoseconds: 1_200_000_000); lastExport = (folder, kinds.count * 120); busy = false; phase = "" }
+            return
+        }
+        guard let r = reader else { busy = false; return }
+        Task.detached {
+            do {
+                let counts = try r.export(kinds, to: folder) { p in Task { @MainActor in self.phase = p } }
+                let total = counts.values.reduce(0, +)
+                await MainActor.run {
+                    self.lastExport = (folder, total); self.busy = false; self.phase = ""
+                    log("Exported \(counts.map { "\($0.key.title) \($0.value)" }.sorted().joined(separator: ", ")) to \(folder.path)")
+                }
+            } catch {
+                await MainActor.run { self.error = "\(error)"; self.busy = false; self.phase = "" }
+            }
+        }
+    }
+
+    func close() { reader?.close(); reader = nil; backup = nil; summary = nil }
+}
+
 struct BackupPane: View {
     @EnvironmentObject var manager: DeviceManager
     @EnvironmentObject var backups: BackupService
+    @StateObject private var browser = BackupBrowserModel()
     @AppStorage("backupRoot") private var backupRoot = BackupService.defaultRoot.path
-    @AppStorage("backupEncrypt") private var encrypt = false
-    @State private var password = ""
+    @AppStorage("lastUDID") private var lastUDID = ""
     @State private var selection: String? = "phone"
     @State private var restoring: BackupInfo?
     @State private var restoreConfirmed = false
     @State private var restorePassword = ""
     @State private var deleting: BackupInfo?
     @State private var badFolder = false
+    @State private var passwordSheet: PasswordSheet.Mode?
+    @State private var unlockPassword = ""
     let showLog: () -> Void
 
     private var root: URL { URL(fileURLWithPath: backupRoot) }
-    private var udid: String { Lockdown.cachedUDID ?? "" }
-    private var ready: Bool { manager.device != nil && Lockdown.available && !backups.running && !udid.isEmpty }
+    private var usbUDID: String { manager.device != nil ? (Lockdown.cachedUDID ?? "") : "" }
+    /// The phone over Wi-Fi when there is no cable: the last phone seen here, if usbmuxd lists it on the network.
+    private var wifiUDID: String? {
+        guard manager.device == nil else { return nil }
+        return manager.networkUDIDs.first { $0 == lastUDID } ?? (lastUDID.isEmpty ? manager.networkUDIDs.first : nil)
+    }
+    private var udid: String { usbUDID.isEmpty ? (wifiUDID ?? "") : usbUDID }
+    private var overWifi: Bool { usbUDID.isEmpty && wifiUDID != nil }
+    private var ready: Bool { !udid.isEmpty && Lockdown.available && !backups.running }
     private var selectedBackup: BackupInfo? { (backups.backups + backups.finderBackups).first { $0.id == selection } }
     private var latest: BackupInfo? { (backups.backups + backups.finderBackups).max { $0.date < $1.date } }
 
@@ -27,8 +103,8 @@ struct BackupPane: View {
             List(selection: $selection) {
                 Section("Device") {
                     HStack(spacing: 8) {
-                        Image(systemName: "iphone").font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 20)
-                        Text(manager.device?.name ?? "This iPhone")
+                        Image(systemName: overWifi ? "wifi" : "iphone").font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 20)
+                        Text(manager.device?.name ?? (overWifi ? "iPhone over Wi-Fi" : "This iPhone"))
                         Spacer()
                     }
                     .frame(height: 24).tag("phone")
@@ -56,7 +132,26 @@ struct BackupPane: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .onAppear { backups.log = { [weak manager] in manager?.addLog($0) }; backups.scan(root) }
+        .onAppear {
+            backups.log = { [weak manager] in manager?.addLog($0) }
+            backups.scan(root)
+            rememberPhone()
+            if let sel = ProcessInfo.processInfo.environment["DECANT_SELECT"], sel.hasPrefix("backup:"), let n = Int(sel.dropFirst(7)),   // screenshot aid
+               backups.backups.indices.contains(n) { selection = backups.backups[n].id }
+        }
+        .onChange(of: manager.catalogComplete) { _ in rememberPhone() }
+        .onChange(of: selection) { _ in if let b = selectedBackup { browser.open(b); unlockPassword = "" } }
+        .sheet(item: $passwordSheet) { mode in
+            PasswordSheet(mode: mode) { current, new in
+                Task {
+                    switch mode {
+                    case .turnOn: _ = await backups.setEncryption(on: true, password: new, udid: udid)
+                    case .turnOff: _ = await backups.setEncryption(on: false, password: current, udid: udid)
+                    case .change: _ = await backups.changePassword(old: current, new: new, udid: udid)
+                    }
+                }
+            }
+        }
         .alert("Restore this backup?", isPresented: Binding(get: { restoring != nil && !restoreConfirmed }, set: { if !$0 { restoring = nil } })) {
             Button("Continue", role: .destructive) { restoreConfirmed = true }
             Button("Cancel", role: .cancel) { restoring = nil }
@@ -85,6 +180,12 @@ struct BackupPane: View {
         } message: { Text(deleting.map { "\($0.deviceName), \($0.date.formatted(date: .abbreviated, time: .shortened)), \(DeviceManager.gb($0.size))" } ?? "") }
     }
 
+    /// Remember the phone that was on the cable so a later Wi-Fi backup knows which network device is ours.
+    private func rememberPhone() {
+        if !usbUDID.isEmpty { lastUDID = usbUDID }
+        if !udid.isEmpty, backups.settingsFor != udid { Task { await backups.readSettings(udid: udid) } }
+    }
+
     private func sidebarRow(_ b: BackupInfo) -> some View {
         HStack(spacing: 8) {
             Image(systemName: b.encrypted ? "lock" : "externaldrive").font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 20)
@@ -98,15 +199,15 @@ struct BackupPane: View {
         .frame(height: 32)
     }
 
-    // MARK: Device page: status, destination, encryption, the primary action, and what a backup holds
+    // MARK: Device page: status, destination, encryption and Wi-Fi settings, the primary action, what a backup holds
 
     private var phoneDetail: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(manager.device?.name ?? "No iPhone").font(.system(size: 20, weight: .semibold))
+                    Text(manager.device?.name ?? (overWifi ? "iPhone over Wi-Fi" : "No iPhone")).font(.system(size: 20, weight: .semibold))
                     Text(latest.map { "Last backed up \($0.date.formatted(.relative(presentation: .named))) · \(DeviceManager.gb($0.size))" }
-                         ?? (manager.device == nil ? manager.statusText : "Never backed up with this Mac"))
+                         ?? (udid.isEmpty ? manager.statusText : "Never backed up with this Mac"))
                         .font(.system(size: 13)).foregroundStyle(.secondary)
                 }
                 Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 0) {
@@ -116,12 +217,8 @@ struct BackupPane: View {
                             Text(DeviceDashboard.shortPath(root)).lineLimit(1).truncationMode(.middle)
                             Button("Change…", action: chooseRoot).buttonStyle(.link)
                             Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([root]) }.buttonStyle(.link)
+                            Text(DeviceManager.freeSpace(at: root).map { "\(DeviceManager.gb($0)) free" } ?? "").foregroundStyle(.secondary).monospacedDigit()
                         }
-                    }
-                    .frame(height: 32)
-                    GridRow {
-                        label("Free space")
-                        Text(DeviceManager.freeSpace(at: root).map(DeviceManager.gb) ?? "–").monospacedDigit()
                     }
                     .frame(height: 32)
                     GridRow {
@@ -130,34 +227,54 @@ struct BackupPane: View {
                     }
                     .frame(height: 32)
                     GridRow {
-                        label("Encryption")
-                        VStack(alignment: .leading, spacing: 8) {
-                            Toggle("Encrypt backup", isOn: $encrypt)
-                            if encrypt {
-                                SecureField("Backup password", text: $password).frame(width: 240)
-                            }
-                            Text("Encrypted backups also hold Health data, saved passwords and Wi-Fi settings. The password is not recoverable.")
-                                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(.vertical, 6)
+                        label("Connection")
+                        Text(manager.device != nil ? (manager.networkUDIDs.contains(usbUDID) ? "USB · also reachable over Wi-Fi" : "USB") : overWifi ? "Wi-Fi, no cable" : "–")
                     }
+                    .frame(height: 32)
+                    GridRow {
+                        label("Encryption")
+                        settingRow(state: backups.willEncrypt,
+                                   on: "On · Health, passwords and Wi-Fi included",
+                                   off: "Off · Health, passwords and Wi-Fi left out") {
+                            if backups.willEncrypt == true {
+                                Button("Change Password…") { passwordSheet = .change }
+                                Button("Turn Off…") { passwordSheet = .turnOff }
+                            } else {
+                                Button("Turn On…") { passwordSheet = .turnOn }
+                            }
+                        }
+                    }
+                    .frame(height: 32)
+                    GridRow {
+                        label("Wi-Fi backups")
+                        settingRow(state: backups.wifiSync,
+                                   on: manager.networkUDIDs.contains(where: { $0 == udid }) ? "On · reachable on this network now" : "On · backs up without the cable on this network",
+                                   off: "Off · a cable is needed to back up") {
+                            Button(backups.wifiSync == true ? "Turn Off" : "Turn On") { Task { _ = await backups.setWifiSync(backups.wifiSync != true, udid: udid) } }
+                                .disabled(usbUDID.isEmpty)
+                                .help(usbUDID.isEmpty ? "Connect the cable to change this" : "")
+                        }
+                    }
+                    .frame(height: 32)
                 }
                 .font(.system(size: 13))
+                .disabled(backups.running)
 
                 if backups.running {
                     HStack(spacing: 12) {
-                        ProgressView(value: backups.progress ?? 0).frame(maxWidth: 360)
+                        ProgressView(value: backups.progress ?? 0).frame(maxWidth: 360).opacity(backups.progress == nil ? 0 : 1)
+                            .overlay { if backups.progress == nil { ProgressView().controlSize(.small) } }
                         Text("\(backups.phase) \(backups.progress.map { "\(Int($0 * 100))%" } ?? "")").font(.system(size: 13)).foregroundStyle(.secondary).monospacedDigit()
                         Spacer()
                         Button("Stop") { backups.cancel() }
                     }
                 } else {
                     HStack(spacing: 8) {
-                        Button("Back Up Now") {
-                            Task { await backups.backup(udid: udid, to: root, password: encrypt ? password : nil) }
+                        Button(overWifi ? "Back Up Now over Wi-Fi" : "Back Up Now") {
+                            Task { await backups.backup(udid: udid, to: root, network: overWifi) }
                         }
-                        .buttonStyle(.borderedProminent).disabled(!ready || (encrypt && password.isEmpty))
-                        Button("Restore from Folder…", action: restoreFromFolder).disabled(!ready)
+                        .buttonStyle(.borderedProminent).disabled(!ready)
+                        Button("Restore from Folder…", action: restoreFromFolder).disabled(!ready || overWifi)
                         if !backups.phase.isEmpty { Text(backups.phase).font(.system(size: 13)).foregroundStyle(.secondary).padding(.leading, 8) }
                     }
                     .controlSize(.large)
@@ -172,8 +289,8 @@ struct BackupPane: View {
                         GridRow { include("Health, passwords, Wi-Fi: encrypted backups only") ; include("Not included: apps themselves, Face ID, Apple Pay cards") }
                     }
                     .font(.system(size: 12))
-                    Text("A restore replaces everything on the iPhone with the backup and reboots it. Decant asks twice and never restores on its own.")
-                        .font(.system(size: 12)).foregroundStyle(.secondary).padding(.top, 4)
+                    Text("Select a backup on the left to read its messages, contacts, call history, notes, voice memos, Safari history and WhatsApp chats, or to export them as files. A restore replaces everything on the iPhone with the backup and reboots it; Decant asks twice and never restores on its own.")
+                        .font(.system(size: 12)).foregroundStyle(.secondary).padding(.top, 4).fixedSize(horizontal: false, vertical: true)
                 }
                 if !backups.finderBackupsReadable {
                     Divider()
@@ -186,7 +303,16 @@ struct BackupPane: View {
                 }
             }
             .padding(24)
-            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: 820, alignment: .leading)
+        }
+    }
+
+    /// A setting's state in words, then the one or two buttons that change it.
+    private func settingRow<B: View>(state: Bool?, on: String, off: String, @ViewBuilder buttons: () -> B) -> some View {
+        HStack(spacing: 12) {
+            Circle().fill(state == true ? Tone.ready : Color(nsColor: .tertiaryLabelColor)).frame(width: 7, height: 7)
+            Text(state == nil ? (udid.isEmpty ? "–" : "Reading…") : state == true ? on : off).lineLimit(1).truncationMode(.tail)
+            if state != nil { HStack(spacing: 8, content: buttons).controlSize(.small).disabled(udid.isEmpty) }
         }
     }
 
@@ -198,7 +324,7 @@ struct BackupPane: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: Backup page
+    // MARK: Backup page: details, actions, and what is inside
 
     private func backupDetail(_ b: BackupInfo) -> some View {
         let isDecant = backups.backups.contains(b)
@@ -224,17 +350,105 @@ struct BackupPane: View {
                 }
                 .font(.system(size: 13))
                 HStack(spacing: 8) {
-                    Button("Restore to iPhone…") { restoring = b }.disabled(!ready)
+                    Button("Restore to iPhone…") { restoring = b }.disabled(!ready || overWifi)
                     if isDecant { Button("Move to Trash…") { deleting = b }.disabled(backups.running) }
                 }
                 .controlSize(.large)
-                Text(ready ? "Restoring puts this backup on \(manager.device?.name ?? "the connected iPhone") and reboots it."
-                           : "Connect and unlock an iPhone to restore this backup.")
+                Text(ready && !overWifi ? "Restoring puts this backup on \(manager.device?.name ?? "the connected iPhone") and reboots it."
+                           : "Connect and unlock an iPhone over USB to restore this backup.")
                     .font(.system(size: 12)).foregroundStyle(.secondary)
+                Divider()
+                contents(b)
             }
             .padding(24)
-            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: 820, alignment: .leading)
         }
+        .onAppear { browser.open(b) }
+    }
+
+    /// What the backup holds, by kind, each exportable on its own or all at once.
+    @ViewBuilder private func contents(_ b: BackupInfo) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Contents").font(.system(size: 13, weight: .medium))
+                Spacer()
+                if browser.summary != nil {
+                    Button("Export All…") { chooseExport(BackupExport.allCases, from: b) }.controlSize(.small).disabled(browser.busy)
+                }
+            }
+            if browser.needsPassword {
+                HStack(spacing: 8) {
+                    Image(systemName: "lock").foregroundStyle(.secondary)
+                    SecureField("Backup password", text: $unlockPassword).textFieldStyle(.roundedBorder).frame(width: 240)
+                        .onSubmit { browser.unlock(unlockPassword) }
+                    Button("Unlock") { browser.unlock(unlockPassword) }.disabled(unlockPassword.isEmpty || browser.busy)
+                    if browser.busy { ProgressView().controlSize(.small) }
+                }
+                Text("This backup is encrypted. The password stays on this Mac for as long as the backup is open and is not stored.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+            } else if let s = browser.summary {
+                VStack(spacing: 0) {
+                    ForEach(BackupExport.allCases) { kind in
+                        contentRow(kind, s, from: b)
+                    }
+                }
+                Text("Exports are plain files: HTML and text for conversations, vCard for contacts, CSV for calls and history, the original audio for voice memos. Nothing is sent anywhere.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else if browser.busy {
+                HStack(spacing: 8) { ProgressView().controlSize(.small); Text(browser.phase).font(.system(size: 13)).foregroundStyle(.secondary) }
+            }
+            if browser.busy && browser.summary != nil {
+                HStack(spacing: 8) { ProgressView().controlSize(.small); Text(browser.phase).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1) }
+            }
+            if let (dir, n) = browser.lastExport {
+                HStack(spacing: 8) {
+                    Text("\(n.formatted()) items exported to \(DeviceDashboard.shortPath(dir))").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([dir]) }.buttonStyle(.link).font(.system(size: 12))
+                }
+            }
+            if let e = browser.error {
+                Text(e).font(.system(size: 12)).foregroundStyle(Tone.warning).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func contentRow(_ kind: BackupExport, _ s: BackupSummary, from b: BackupInfo) -> some View {
+        let (count, detail) = describe(kind, s)
+        return HStack(spacing: 12) {
+            Image(systemName: kind.symbol).font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 24)
+            Text(kind.title).font(.system(size: 13, weight: .medium)).frame(width: 128, alignment: .leading)
+            Text(count == 0 ? "None" : detail).font(.system(size: 13)).foregroundStyle(count == 0 ? .tertiary : .secondary).monospacedDigit()
+            Spacer()
+            Button("Export…") { chooseExport([kind], from: b) }.controlSize(.small).disabled(count == 0 || browser.busy)
+        }
+        .frame(height: 36)
+        .overlay(alignment: .bottom) { Divider().padding(.leading, 36) }
+    }
+
+    private func describe(_ kind: BackupExport, _ s: BackupSummary) -> (Int, String) {
+        func n(_ v: Int, _ one: String, _ many: String) -> String { "\(v.formatted()) \(v == 1 ? one : many)" }
+        switch kind {
+        case .messages: return (s.messages, "\(n(s.messages, "message", "messages")) in \(n(s.conversations, "conversation", "conversations"))")
+        case .contacts: return (s.contacts, n(s.contacts, "contact", "contacts"))
+        case .calls: return (s.calls, n(s.calls, "call", "calls"))
+        case .notes: return (s.notes, n(s.notes, "note", "notes"))
+        case .voiceMemos: return (s.voiceMemos, n(s.voiceMemos, "recording", "recordings"))
+        case .safari: return (s.safariHistory, n(s.safariHistory, "page visit", "page visits"))
+        case .whatsapp: return (s.whatsappMessages, s.whatsappChats == 0 ? "" : "\(n(s.whatsappMessages, "message", "messages")) in \(n(s.whatsappChats, "chat", "chats"))")
+        }
+    }
+
+    private func chooseExport(_ kinds: [BackupExport], from b: BackupInfo) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
+        panel.prompt = "Export here"
+        panel.message = kinds.count == 1 ? "Choose a folder for the \(kinds[0].title.lowercased()) export" : "Choose a folder for the export"
+        panel.directoryURL = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ?? FileManager.default.homeDirectoryForCurrentUser).appendingPathComponent("Decant")
+        guard panel.runModal() == .OK, let dir = panel.url else { return }
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        let target = dir.appendingPathComponent("\(b.deviceName) \(f.string(from: b.date))")
+        try? FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        browser.export(kinds, to: target) { [weak manager] in manager?.addLog($0) }
     }
 
     private func detailRow(_ k: String, _ v: String) -> some View {
@@ -259,6 +473,61 @@ struct BackupPane: View {
         panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
         panel.directoryURL = root
         if panel.runModal() == .OK, let u = panel.url { backupRoot = u.path; backups.scan(u) }
+    }
+}
+
+/// Setting, removing or changing the backup password. The phone asks for its passcode when the setting changes.
+struct PasswordSheet: View {
+    enum Mode: String, Identifiable { case turnOn, turnOff, change; var id: String { rawValue } }
+    let mode: Mode
+    let done: (String, String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var current = ""
+    @State private var new = ""
+    @State private var confirm = ""
+
+    private var title: String {
+        switch mode { case .turnOn: return "Turn On Backup Encryption"; case .turnOff: return "Turn Off Backup Encryption"; case .change: return "Change Backup Password" }
+    }
+    private var valid: Bool {
+        switch mode {
+        case .turnOn: return !new.isEmpty && new == confirm
+        case .turnOff: return !current.isEmpty
+        case .change: return !current.isEmpty && !new.isEmpty && new == confirm
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.system(size: 17, weight: .semibold))
+                Text(mode == .turnOff ? "Future backups leave out Health data, saved passwords and Wi-Fi settings. Existing encrypted backups keep their password."
+                     : "Encrypted backups include Health data, saved passwords and Wi-Fi settings. Apple cannot recover a forgotten backup password; write it down.")
+                    .font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 12) {
+                if mode != .turnOn {
+                    GridRow { Text("Current password").foregroundStyle(.secondary); SecureField("", text: $current).textFieldStyle(.roundedBorder).frame(width: 260) }
+                }
+                if mode != .turnOff {
+                    GridRow { Text(mode == .change ? "New password" : "Password").foregroundStyle(.secondary); SecureField("", text: $new).textFieldStyle(.roundedBorder).frame(width: 260) }
+                    GridRow { Text("Verify").foregroundStyle(.secondary); SecureField("", text: $confirm).textFieldStyle(.roundedBorder).frame(width: 260) }
+                }
+            }
+            .font(.system(size: 13))
+            if mode != .turnOff && !confirm.isEmpty && new != confirm {
+                Text("The passwords do not match").font(.system(size: 12)).foregroundStyle(Tone.warning)
+            }
+            Text("The iPhone asks for its passcode to confirm.").font(.system(size: 12)).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(mode == .turnOff ? "Turn Off" : mode == .change ? "Change" : "Turn On") { done(current, new); dismiss() }
+                    .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(!valid)
+            }
+        }
+        .padding(24)
+        .frame(width: 460)
     }
 }
 
