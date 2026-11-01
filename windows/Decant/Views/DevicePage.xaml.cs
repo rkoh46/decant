@@ -71,6 +71,7 @@ public sealed partial class DevicePage : UserControl
             ("Device name", i.Name), ("iOS version", i.Version), ("Model", i.Model), ("Serial number", Mask(i.Serial)),
             ("Connection", "USB"), ("Photos", Format.Count(s.PhotoCount)), ("Live Photos", Format.Count(s.LiveCount)),
         });
+        if (i.Serial.Length > 0) SerialRow(InfoLeft, 3, i.Serial);
         Table(InfoRight, new[]
         {
             ("Wi-Fi address", i.WifiAddress), ("Bluetooth address", i.BluetoothAddress), ("Model number", i.ModelNumber), ("Region", i.Region),
@@ -95,6 +96,22 @@ public sealed partial class DevicePage : UserControl
     }
 
     static string Mask(string serial) => serial.Length == 0 ? "" : new string('•', Math.Min(12, serial.Length));
+    bool serialShown;
+
+    /// The serial number row gets an eye button that reveals the value (hidden by default so screenshots are safe).
+    void SerialRow(Grid g, int row, string serial)
+    {
+        var v = (TextBlock)g.Children.First(c => Grid.GetRow((FrameworkElement)c) == row && Grid.GetColumn((FrameworkElement)c) == 1);
+        v.Text = serialShown ? serial : Mask(serial);
+        var eye = new Button { Content = new FontIcon { Glyph = serialShown ? "\uED1A" : "\uE7B3", FontSize = 12 }, Padding = new Thickness(4),
+            Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
+            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"] };
+        ToolTipService.SetToolTip(eye, serialShown ? "Hide serial number" : "Show serial number");
+        eye.Click += (_, _) => { serialShown = !serialShown; Render(); };
+        var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        g.Children.Remove(v); panel.Children.Add(v); panel.Children.Add(eye);
+        Grid.SetRow(panel, row); Grid.SetColumn(panel, 1); g.Children.Add(panel);
+    }
 
     void RenderStorage()
     {

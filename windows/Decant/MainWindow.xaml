@@ -18,20 +18,21 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <StackPanel Orientation="Horizontal" Spacing="10" Margin="16,0" VerticalAlignment="Center">
-                <FontIcon Glyph="&#xE8EA;" FontSize="20" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Image x:Name="Mark" Width="24" Height="24" VerticalAlignment="Center" />
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock Text="Decant" FontSize="16" FontWeight="Medium" />
                     <TextBlock Text="AIO iOS toolkit" Style="{StaticResource Caption}" />
                 </StackPanel>
             </StackPanel>
-            <SelectorBar x:Name="Tabs" Grid.Column="1" VerticalAlignment="Center" SelectionChanged="Tabs_SelectionChanged">
-                <SelectorBarItem x:Name="DeviceTab" Text="Device" IsSelected="True">
-                    <SelectorBarItem.Icon><FontIcon Glyph="&#xE8EA;" /></SelectorBarItem.Icon>
-                </SelectorBarItem>
-                <SelectorBarItem x:Name="PhotosTab" Text="Photos">
-                    <SelectorBarItem.Icon><FontIcon Glyph="&#xEB9F;" /></SelectorBarItem.Icon>
-                </SelectorBarItem>
-            </SelectorBar>
+            <!-- Tabs as on the Mac: a glyph over a caption in an 80 x 44 tile; the selected one gets a quiet fill. -->
+            <StackPanel x:Name="Tabs" Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                <Button x:Name="DeviceTab" Style="{StaticResource Tab}" Click="Tab_Click">
+                    <StackPanel Spacing="4"><FontIcon Glyph="&#xE8EA;" FontSize="17" /><TextBlock Text="Device" FontSize="11" HorizontalAlignment="Center" /></StackPanel>
+                </Button>
+                <Button x:Name="PhotosTab" Style="{StaticResource Tab}" Click="Tab_Click">
+                    <StackPanel Spacing="4"><FontIcon Glyph="&#xEB9F;" FontSize="17" /><TextBlock Text="Photos" FontSize="11" HorizontalAlignment="Center" /></StackPanel>
+                </Button>
+            </StackPanel>
             <!-- Stand-ins for the system caption buttons, shown only in the offscreen screenshot mode. -->
             <StackPanel x:Name="Caption" Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Visibility="Collapsed">
                 <FontIcon Glyph="&#xE921;" FontSize="10" Width="46" Height="32" />

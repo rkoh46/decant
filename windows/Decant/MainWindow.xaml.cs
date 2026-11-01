@@ -26,6 +26,12 @@ public sealed partial class MainWindow : Window
             SetTitleBar(TopBar);
         }
         AppWindow.Title = "Decant";
+        var assets = Path.Combine(AppContext.BaseDirectory, "Assets");
+        try { AppWindow.SetIcon(Path.Combine(assets, "Decant.ico")); } catch (Exception e) { App.Trace("icon: " + e.Message); }
+        void SetMark() => Mark.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(Path.Combine(assets,
+            Root.ActualTheme == ElementTheme.Dark ? "mark-dark.png" : "mark-light.png")));
+        SetMark();
+        Root.ActualThemeChanged += (_, _) => SetMark();
         var size = Environment.GetEnvironmentVariable("DECANT_WINDOW")?.Split('x');
         var w = size?.Length == 2 && int.TryParse(size[0], out var sw) ? sw : 1000;
         var h = size?.Length == 2 && int.TryParse(size[1], out var sh) ? sh : 835;
@@ -37,7 +43,7 @@ public sealed partial class MainWindow : Window
 
         Device.Attach(Session, this);
         Photos.Attach(Session, this);
-        if (Environment.GetEnvironmentVariable("DECANT_TAB") == "photos") { DeviceTab.IsSelected = false; PhotosTab.IsSelected = true; Tabs.SelectedItem = PhotosTab; ShowTab(true); }
+        ShowTab(Environment.GetEnvironmentVariable("DECANT_TAB") == "photos");
         Session.Changed += () => DispatcherQueue.TryEnqueue(RenderChip);
         RenderChip();
         _ = Session.Refresh();
@@ -98,10 +104,16 @@ public sealed partial class MainWindow : Window
         catch { }
     }
 
-    void Tabs_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args) => ShowTab(sender.SelectedItem == PhotosTab);
+    void Tab_Click(object sender, RoutedEventArgs e) => ShowTab(sender == PhotosTab);
 
     void ShowTab(bool photos)
     {
+        var res = Application.Current.Resources;
+        foreach (var (b, on) in new[] { (DeviceTab, !photos), (PhotosTab, photos) })
+        {
+            b.Background = on ? (Brush)res["ControlFillColorSecondaryBrush"] : new SolidColorBrush(Colors.Transparent);
+            b.Foreground = (Brush)res[on ? "TextFillColorPrimaryBrush" : "TextFillColorSecondaryBrush"];
+        }
         Device.Visibility = photos ? Visibility.Collapsed : Visibility.Visible;
         Photos.Visibility = photos ? Visibility.Visible : Visibility.Collapsed;
         if (photos) Photos.Shown();
