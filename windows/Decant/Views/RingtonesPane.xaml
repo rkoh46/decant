@@ -1,0 +1,92 @@
+<UserControl
+    x:Class="Decant.Views.RingtonesPane"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Decant.Views"
+    AllowDrop="True" DragOver="Pane_DragOver" Drop="Pane_Drop" DragLeave="Pane_DragLeave">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="40" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <!-- Header bar -->
+        <Grid Padding="12,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <TextBlock Text="Ringtones" FontSize="13" FontWeight="Medium" VerticalAlignment="Center" />
+                <TextBlock x:Name="CountText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                <ProgressRing x:Name="Spinner" IsActive="True" Width="14" Height="14" Visibility="Collapsed" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Button x:Name="RemoveButton" Content="Remove…" FontSize="12" Padding="10,3" Click="Remove_Click" />
+                <Button x:Name="AddButton" Content="Add Ringtone…" FontSize="12" Padding="10,3" Style="{StaticResource AccentButtonStyle}" Click="Add_Click" />
+            </StackPanel>
+        </Grid>
+        <!-- Table -->
+        <Grid Grid.Row="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="28" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Grid Padding="20,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="80" />
+                    <ColumnDefinition Width="200" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Name" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="Length" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Text="File" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+            </Grid>
+            <ListView x:Name="Table" Grid.Row="1" SelectionMode="Extended" Padding="12,4" SelectionChanged="Table_SelectionChanged">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="MinHeight" Value="24" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="8,0" />
+                        <Setter Property="Margin" Value="0" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:ToneRow">
+                        <Grid Height="24">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="80" />
+                                <ColumnDefinition Width="200" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xEA8F;" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="{x:Bind Name}" FontSize="13" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" Text="{x:Bind Length}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontFamily="{StaticResource MonoFont}" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="2" Text="{x:Bind File}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontFamily="{StaticResource MonoFont}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+            <StackPanel x:Name="EmptyPanel" Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="6" Visibility="Collapsed">
+                <TextBlock Text="No custom ringtones on this iPhone" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+                <TextBlock Text="Add one from any song, voice memo or video. Drop a file here or use Add Ringtone." FontSize="12" Foreground="{ThemeResource TextFillColorTertiaryBrush}" HorizontalAlignment="Center" />
+            </StackPanel>
+            <StackPanel x:Name="NotReady" Grid.RowSpan="2" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12" Visibility="Collapsed">
+                <FontIcon Glyph="&#xEA8F;" FontSize="44" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                <TextBlock x:Name="NotReadyText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+            </StackPanel>
+            <Border x:Name="DropOverlay" Grid.RowSpan="2" Margin="8" CornerRadius="12" BorderThickness="2" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" Visibility="Collapsed" IsHitTestVisible="False">
+                <TextBlock Text="Drop audio to make a ringtone" FontSize="15" FontWeight="Medium" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+        </Grid>
+        <Border Grid.Row="2" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="16,10">
+            <TextBlock FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"
+                       Text="Tones go to Settings → Sounds &amp; Haptics → Ringtone, under their own Ringtones heading, and can be set per contact. The phone shows a new tone right away; a removed one disappears once Settings is reopened." />
+        </Border>
+        <Grid x:Name="StatusBar" Grid.Row="3" Height="40" Padding="16,0" Background="{ThemeResource LayerOnMicaBaseAltFillColorDefaultBrush}" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Visibility="Collapsed">
+            <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                <ProgressRing x:Name="StatusSpinner" IsActive="True" Width="16" Height="16" Visibility="Collapsed" />
+                <TextBlock x:Name="StatusText" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</UserControl>

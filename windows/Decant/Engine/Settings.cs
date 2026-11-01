@@ -6,6 +6,7 @@ namespace Decant.Engine;
 public sealed class Settings
 {
     public string PhotosFolder { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+    public string AppsSort { get; set; } = "size";          // Apps tab order: size, data, name or date
 
     static readonly string file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Decant", "settings.json");
     public static Settings Load()
