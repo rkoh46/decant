@@ -4,6 +4,26 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:Decant.Views">
     <Grid>
-        <TextBlock Text="Backup" Style="{StaticResource Caption}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="240" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <!-- Sidebar: the phone, Decant's backups, iTunes backups -->
+        <Grid Background="{ThemeResource LayerOnMicaBaseAltFillColorDefaultBrush}" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,1,0">
+            <ListView x:Name="Sidebar" SelectionMode="Single" SelectionChanged="Sidebar_SelectionChanged" Padding="8,12" IsItemClickEnabled="False">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="MinHeight" Value="34" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="12,0" />
+                        <Setter Property="Margin" Value="0,1" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+            </ListView>
+        </Grid>
+        <!-- Detail: the phone, or the selected backup. Built in code. -->
+        <ScrollViewer Grid.Column="1">
+            <StackPanel x:Name="Detail" Padding="24" MaxWidth="820" HorizontalAlignment="Left" Spacing="24" />
+        </ScrollViewer>
     </Grid>
 </UserControl>

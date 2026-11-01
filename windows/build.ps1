@@ -15,5 +15,13 @@ if (Test-Path "$vcpkg\tools\libimobiledevice") {
   Copy-Item "$vcpkg\bin\*.dll" "$out\Tools\" -Force
   "staged device tools from $vcpkg"
 }
+# Restores: idevicerestore and irecovery (vcpkg ports idevicerestore and libirecovery), when they were built.
+foreach ($t in @('idevicerestore', 'libirecovery')) {
+  if (Test-Path "$vcpkg\tools\$t") {
+    New-Item -ItemType Directory -Force "$out\Tools" | Out-Null
+    Copy-Item "$vcpkg\tools\$t\*.exe" "$out\Tools\" -Force
+    "staged $t"
+  }
+}
 "built $out\Decant.exe"
 if ($Run) { & "$out\Decant.exe" }
