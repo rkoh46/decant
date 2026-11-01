@@ -4,6 +4,124 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:Decant.Views">
     <Grid>
-        <TextBlock Text="Files" Style="{StaticResource Caption}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <!-- Sidebar: Locations and App documents -->
+        <Grid Background="{ThemeResource LayerOnMicaBaseAltFillColorDefaultBrush}" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,1,0">
+            <ListView x:Name="Side" SelectionMode="Single" SelectionChanged="Side_SelectionChanged" Padding="8,12" IsItemClickEnabled="False">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="MinHeight" Value="32" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="12,0" />
+                        <Setter Property="Margin" Value="0,1" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:SideRow">
+                        <Grid>
+                            <TextBlock Text="{x:Bind Title}" FontSize="11" FontWeight="Medium" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Bottom" Margin="0,8,0,2" Visibility="{x:Bind HeaderVisible}" />
+                            <TextBlock Text="{x:Bind Title}" FontSize="12" Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap" VerticalAlignment="Center" Visibility="{x:Bind NoteVisible}" />
+                            <StackPanel Orientation="Horizontal" Spacing="10" Visibility="{x:Bind ItemVisible}">
+                                <FontIcon Glyph="{x:Bind Glyph}" FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="{x:Bind Title}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Grid>
+        <!-- Ringtones pane, shown in place of the browser for that location -->
+        <local:RingtonesPane x:Name="Ringtones" Grid.Column="1" Visibility="Collapsed" />
+        <!-- Browser -->
+        <Grid x:Name="Browser" Grid.Column="1" AllowDrop="True" DragOver="Browser_DragOver" Drop="Browser_Drop" DragLeave="Browser_DragLeave">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <!-- Toolbar -->
+            <Grid Padding="12,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button x:Name="BackButton" Padding="6,3" MinWidth="0" Click="Back_Click" ToolTipService.ToolTip="Back"><FontIcon Glyph="&#xE76B;" FontSize="12" /></Button>
+                    <TextBlock x:Name="Crumb" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="360" />
+                    <ProgressRing x:Name="Spinner" IsActive="True" Width="14" Height="14" Visibility="Collapsed" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <TextBlock x:Name="CountText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,4,0" />
+                    <Button x:Name="NewFolderButton" Content="New Folder" FontSize="12" Padding="10,3" Click="NewFolder_Click" />
+                    <Button x:Name="UploadButton" Content="Upload…" FontSize="12" Padding="10,3" Click="Upload_Click" />
+                    <Button x:Name="DownloadButton" Content="Download…" FontSize="12" Padding="10,3" Click="Download_Click" />
+                    <Button x:Name="DeleteButton" Padding="7,4" MinWidth="0" Click="Delete_Click" ToolTipService.ToolTip="Delete"><FontIcon Glyph="&#xE74D;" FontSize="12" /></Button>
+                </StackPanel>
+            </Grid>
+            <!-- Table -->
+            <Grid Grid.Row="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="28" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Grid Padding="20,0,20,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="90" />
+                        <ColumnDefinition Width="170" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Name" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="Size" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Text="Modified" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                </Grid>
+                <ListView x:Name="Table" Grid.Row="1" SelectionMode="Extended" Padding="12,4" SelectionChanged="Table_SelectionChanged" DoubleTapped="Table_DoubleTapped" RightTapped="Table_RightTapped">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="MinHeight" Value="24" />
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="Padding" Value="8,0" />
+                            <Setter Property="Margin" Value="0" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:FileRow">
+                            <Grid Height="24">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="90" />
+                                    <ColumnDefinition Width="170" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="{x:Bind Glyph}" FontSize="14" Foreground="{x:Bind GlyphBrush}" VerticalAlignment="Center" />
+                                    <TextBlock Text="{x:Bind Name}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="1" Text="{x:Bind Size}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontFamily="{StaticResource MonoFont}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="2" Text="{x:Bind Modified}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+                <TextBlock x:Name="EmptyFolder" Grid.Row="1" Text="Empty folder" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
+                <StackPanel x:Name="NotReady" Grid.RowSpan="2" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12" Visibility="Collapsed">
+                    <FontIcon Glyph="&#xE8B7;" FontSize="44" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    <TextBlock x:Name="NotReadyText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+                </StackPanel>
+                <Border x:Name="DropOverlay" Grid.RowSpan="2" Margin="8" CornerRadius="12" BorderThickness="2" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" Visibility="Collapsed" IsHitTestVisible="False">
+                    <TextBlock Text="Drop files to upload them here" FontSize="15" FontWeight="Medium" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+            </Grid>
+            <!-- Help for the Media root -->
+            <Border x:Name="MediaHelp" Grid.Row="2" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="16,10">
+                <TextBlock FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"
+                           Text="Media is what the iPhone shows over USB: books, ringtones, recordings and the Photos database. The Files app's On My iPhone and iCloud Drive folders are not reachable this way; an app's own documents are listed on the left when the app allows file sharing." />
+            </Border>
+            <!-- Status bar -->
+            <Grid x:Name="StatusBar" Grid.Row="3" Height="40" Padding="16,0" Background="{ThemeResource LayerOnMicaBaseAltFillColorDefaultBrush}" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <ProgressRing x:Name="StatusSpinner" IsActive="True" Width="16" Height="16" Visibility="Collapsed" />
+                    <TextBlock x:Name="StatusText" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+        </Grid>
     </Grid>
 </UserControl>
