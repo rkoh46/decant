@@ -24,7 +24,7 @@ runs and hashes; Windows on ARM runs them under emulation). The DLL resolvers ac
 (`imobiledevice-1.0.dll`) and the MinGW names (`libimobiledevice-1.0.dll`), so a Tools folder made only of the
 MinGW set works on an x64 PC. The Firmware tab shows under Recovery whether a restore can run and what to install
 if not (`Engine\Requirements.cs`: the Apple Devices or iTunes package, whose driver libirecovery uses on Windows).
-Future Restore stays disabled: futurerestore has no current Windows build. `THIRD-PARTY-NOTICES.md` is copied next
+Future Restore is hidden on Windows (the button appears only when a futurerestore.exe is in Tools): futurerestore has no current Windows build. `THIRD-PARTY-NOTICES.md` is copied next
 to the exe.
 
 Screenshots for the README come from `DECANT_DEMO=1 DECANT_SHOT=<file.png>` with `DECANT_TAB` per tab: the window is laid out at the `DECANT_WINDOW` size and rendered to the file, which works on a tiny

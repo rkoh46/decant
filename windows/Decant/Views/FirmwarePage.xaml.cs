@@ -218,9 +218,9 @@ public sealed partial class FirmwarePage : UserControl, ITabPage
                 buttons.Children.Add(Rows.Small("Update…", () => ConfirmRestore(fw, false, false), can));
                 buttons.Children.Add(Rows.Small("Restore…", () => ConfirmRestore(fw, true, false), can));
             }
-            else
+            else if (Tools.Has("futurerestore"))   // futurerestore has no current Windows build; the button appears only when one is bundled
             {
-                var can = Connected && downloaded && blob != null && !firmware.Running && Tools.Has("futurerestore");
+                var can = Connected && downloaded && blob != null && !firmware.Running;
                 var b = Rows.Small("Future Restore…", () => ConfirmRestore(fw, true, true), can);
                 ToolTipService.SetToolTip(b, blob != null ? "Needs the phone's nonce set to the blob's generator" : "No blob saved for this version");
                 buttons.Children.Add(b);
@@ -256,8 +256,7 @@ public sealed partial class FirmwarePage : UserControl, ITabPage
         var blocker = Requirements.RestoreBlocker();
         return new TextBlock
         {
-            Text = (blocker == null ? "Restores ready: idevicerestore, irecovery and Apple's USB driver are on this PC" : "Restores unavailable: " + blocker)
-                + (Tools.Has("futurerestore") ? "" : ". Future Restore needs futurerestore.exe, which has no current Windows build"),
+            Text = blocker == null ? "Restores ready: idevicerestore, irecovery and Apple's USB driver are on this PC" : "Restores unavailable: " + blocker,
             FontSize = 12, Foreground = Rows.Res("TextFillColorSecondaryBrush"), TextWrapping = TextWrapping.Wrap,
         };
     }
