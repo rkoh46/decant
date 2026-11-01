@@ -8,7 +8,7 @@ using Decant.Engine;
 
 namespace Decant.Views;
 
-public sealed partial class DevicePage : UserControl
+public sealed partial class DevicePage : UserControl, ITabPage
 {
     Session session = null!;
     MainWindow window = null!;
@@ -16,6 +16,8 @@ public sealed partial class DevicePage : UserControl
     string screenKey = "";
 
     public DevicePage() { InitializeComponent(); Screen.ItemsSource = screen; }
+
+    public void Shown() { }
 
     public void Attach(Session s, MainWindow w)
     {

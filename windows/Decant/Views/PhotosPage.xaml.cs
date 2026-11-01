@@ -25,7 +25,7 @@ public sealed class Tile : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
 }
 
-public sealed partial class PhotosPage : UserControl
+public sealed partial class PhotosPage : UserControl, ITabPage
 {
     Session session = null!;
     MainWindow window = null!;

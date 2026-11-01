@@ -43,7 +43,12 @@ public sealed partial class MainWindow : Window
 
         Device.Attach(Session, this);
         Photos.Attach(Session, this);
-        ShowTab(Environment.GetEnvironmentVariable("DECANT_TAB") == "photos");
+        Apps.Attach(Session, this);
+        Files.Attach(Session, this);
+        Backup.Attach(Session, this);
+        Firmware.Attach(Session, this);
+        Tools.Attach(Session, this);
+        ShowTab(Environment.GetEnvironmentVariable("DECANT_TAB") ?? "device");
         Session.Changed += () => DispatcherQueue.TryEnqueue(RenderChip);
         RenderChip();
         _ = Session.Refresh();
@@ -104,19 +109,30 @@ public sealed partial class MainWindow : Window
         catch { }
     }
 
-    void Tab_Click(object sender, RoutedEventArgs e) => ShowTab(sender == PhotosTab);
+    void Tab_Click(object sender, RoutedEventArgs e) => ShowTab((string)((Button)sender).Tag);
 
-    void ShowTab(bool photos)
+    /// The tab pages, by the key DECANT_TAB and the tab buttons' Tag use.
+    IEnumerable<(string key, Button button, UIElement page)> TabPages => new (string, Button, UIElement)[]
     {
+        ("device", DeviceTab, Device), ("photos", PhotosTab, Photos), ("apps", AppsTab, Apps), ("files", FilesTab, Files),
+        ("backup", BackupTab, Backup), ("firmware", FirmwareTab, Firmware), ("tools", ToolsTab, Tools),
+    };
+
+    public string CurrentTab { get; private set; } = "device";
+
+    public void ShowTab(string key)
+    {
+        if (!TabPages.Any(t => t.key == key)) key = "device";
+        CurrentTab = key;
         var res = Application.Current.Resources;
-        foreach (var (b, on) in new[] { (DeviceTab, !photos), (PhotosTab, photos) })
+        foreach (var (k, b, page) in TabPages)
         {
+            var on = k == key;
             b.Background = on ? (Brush)res["ControlFillColorSecondaryBrush"] : new SolidColorBrush(Colors.Transparent);
             b.Foreground = (Brush)res[on ? "TextFillColorPrimaryBrush" : "TextFillColorSecondaryBrush"];
+            page.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+            if (on && page is Views.ITabPage tp) tp.Shown();
         }
-        Device.Visibility = photos ? Visibility.Collapsed : Visibility.Visible;
-        Photos.Visibility = photos ? Visibility.Visible : Visibility.Collapsed;
-        if (photos) Photos.Shown();
     }
 
     void RenderChip()

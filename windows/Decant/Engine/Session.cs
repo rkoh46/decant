@@ -20,6 +20,8 @@ public sealed class Session
     public event Action<string>? Logged;
 
     public bool Ready => Phone != null && Info != null;
+    public string Udid => Phone?.Udid ?? "";
+    public static bool Demo => PhoneFinder.Demo;
     public int PhotoCount => Items.Count(i => !i.IsVideo);
     public int VideoCount => Items.Count(i => i.IsVideo);
     public int LiveCount => Items.Count(i => i.IsLivePhoto);

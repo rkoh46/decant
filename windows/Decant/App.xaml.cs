@@ -5,7 +5,7 @@ namespace Decant;
 public partial class App : Application
 {
     public static Window? Window { get; private set; }
-    public static readonly string LogFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Decant", "decant.log");
+    public static readonly string LogFile = Environment.GetEnvironmentVariable("DECANT_LOG") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Decant", "decant.log");
 
     public App()
     {

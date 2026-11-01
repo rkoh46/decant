@@ -25,12 +25,28 @@
                 </StackPanel>
             </StackPanel>
             <!-- Tabs as on the Mac: a glyph over a caption in an 80 x 44 tile; the selected one gets a quiet fill. -->
+            <!-- Tabs as on the Mac: a glyph over a caption in an 80 x 44 tile; the selected one gets a quiet fill. -->
             <StackPanel x:Name="Tabs" Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                <Button x:Name="DeviceTab" Style="{StaticResource Tab}" Click="Tab_Click">
+                <Button x:Name="DeviceTab" Style="{StaticResource Tab}" Click="Tab_Click" Tag="device">
                     <StackPanel Spacing="4"><FontIcon Glyph="&#xE8EA;" FontSize="17" /><TextBlock Text="Device" FontSize="11" HorizontalAlignment="Center" /></StackPanel>
                 </Button>
-                <Button x:Name="PhotosTab" Style="{StaticResource Tab}" Click="Tab_Click">
+                <Button x:Name="PhotosTab" Style="{StaticResource Tab}" Click="Tab_Click" Tag="photos">
                     <StackPanel Spacing="4"><FontIcon Glyph="&#xEB9F;" FontSize="17" /><TextBlock Text="Photos" FontSize="11" HorizontalAlignment="Center" /></StackPanel>
+                </Button>
+                <Button x:Name="AppsTab" Style="{StaticResource Tab}" Click="Tab_Click" Tag="apps">
+                    <StackPanel Spacing="4"><FontIcon Glyph="&#xE71D;" FontSize="17" /><TextBlock Text="Apps" FontSize="11" HorizontalAlignment="Center" /></StackPanel>
+                </Button>
+                <Button x:Name="FilesTab" Style="{StaticResource Tab}" Click="Tab_Click" Tag="files">
+                    <StackPanel Spacing="4"><FontIcon Glyph="&#xE8B7;" FontSize="17" /><TextBlock Text="Files" FontSize="11" HorizontalAlignment="Center" /></StackPanel>
+                </Button>
+                <Button x:Name="BackupTab" Style="{StaticResource Tab}" Click="Tab_Click" Tag="backup">
+                    <StackPanel Spacing="4"><FontIcon Glyph="&#xEDA2;" FontSize="17" /><TextBlock Text="Backup" FontSize="11" HorizontalAlignment="Center" /></StackPanel>
+                </Button>
+                <Button x:Name="FirmwareTab" Style="{StaticResource Tab}" Click="Tab_Click" Tag="firmware">
+                    <StackPanel Spacing="4"><FontIcon Glyph="&#xE950;" FontSize="17" /><TextBlock Text="Firmware" FontSize="11" HorizontalAlignment="Center" /></StackPanel>
+                </Button>
+                <Button x:Name="ToolsTab" Style="{StaticResource Tab}" Click="Tab_Click" Tag="tools">
+                    <StackPanel Spacing="4"><FontIcon Glyph="&#xE90F;" FontSize="17" /><TextBlock Text="Tools" FontSize="11" HorizontalAlignment="Center" /></StackPanel>
                 </Button>
             </StackPanel>
             <!-- Stand-ins for the system caption buttons, shown only in the offscreen screenshot mode. -->
@@ -51,5 +67,10 @@
         </Grid>
         <views:DevicePage x:Name="Device" Grid.Row="1" />
         <views:PhotosPage x:Name="Photos" Grid.Row="1" Visibility="Collapsed" />
+        <views:AppsPage x:Name="Apps" Grid.Row="1" Visibility="Collapsed" />
+        <views:FilesPage x:Name="Files" Grid.Row="1" Visibility="Collapsed" />
+        <views:BackupPage x:Name="Backup" Grid.Row="1" Visibility="Collapsed" />
+        <views:FirmwarePage x:Name="Firmware" Grid.Row="1" Visibility="Collapsed" />
+        <views:ToolsPage x:Name="Tools" Grid.Row="1" Visibility="Collapsed" />
     </Grid>
 </Window>
