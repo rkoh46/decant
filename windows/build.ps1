@@ -23,5 +23,13 @@ foreach ($t in @('idevicerestore', 'libirecovery')) {
     "staged $t"
   }
 }
+# Restores on any PC: the MinGW builds of idevicerestore and irecovery from the libimobiledevice project's own CI
+# (windows\tools\mingw64, see PROVENANCE.md there). x86_64; Windows on ARM runs them under emulation.
+if (Test-Path "$root\tools\mingw64\idevicerestore.exe") {
+  New-Item -ItemType Directory -Force "$out\Tools" | Out-Null
+  Copy-Item "$root\tools\mingw64\*.exe", "$root\tools\mingw64\*.dll" "$out\Tools\" -Force
+  "staged idevicerestore and irecovery (mingw64)"
+}
+Copy-Item "$root\THIRD-PARTY-NOTICES.md" "$out\" -Force
 "built $out\Decant.exe"
 if ($Run) { & "$out\Decant.exe" }

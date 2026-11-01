@@ -16,10 +16,16 @@ Service, and libimobiledevice in a `Tools` folder next to `Decant.exe` (or `%LOC
 tools `idevice_id`, `ideviceinfo`, `idevicediagnostics`, `idevicename`, `idevicebackup2`, `idevicepair`,
 `idevicesyslog`, `idevicecrashreport`, `idevicescreenshot` and `ideviceenterrecovery`, plus `imobiledevice-1.0.dll`,
 `plist-2.0.dll` and the DLLs they need. The camera roll, app list, app documents, ringtones and icons go through the
-library directly (`Engine\Afc.cs`, `InstallProxy.cs`, `SpringBoard.cs`), not helper processes. `irecovery.exe` and
-`idevicerestore.exe` are optional: without them the Firmware tab's mode check, Update and Restore stay disabled.
-`build.ps1` stages all of that from a vcpkg install of `libimobiledevice[tools]` when one is present
-(`C:\vcpkg\installed\<arch>-windows`, or `VCPKG_INSTALLED`).
+library directly (`Engine\Afc.cs`, `InstallProxy.cs`, `SpringBoard.cs`), not helper processes. `build.ps1` stages
+all of that from a vcpkg install of `libimobiledevice[tools]` when one is present (`C:\vcpkg\installed\<arch>-windows`,
+or `VCPKG_INSTALLED`), and the restore tools from `tools\mingw64`: `idevicerestore.exe`, `irecovery.exe` and their
+DLLs as the libimobiledevice project builds them for Windows with MinGW (x86_64; `PROVENANCE.md` there lists the CI
+runs and hashes; Windows on ARM runs them under emulation). The DLL resolvers accept both the vcpkg names
+(`imobiledevice-1.0.dll`) and the MinGW names (`libimobiledevice-1.0.dll`), so a Tools folder made only of the
+MinGW set works on an x64 PC. The Firmware tab shows under Recovery whether a restore can run and what to install
+if not (`Engine\Requirements.cs`: the Apple Devices or iTunes package, whose driver libirecovery uses on Windows).
+Future Restore stays disabled: futurerestore has no current Windows build. `THIRD-PARTY-NOTICES.md` is copied next
+to the exe.
 
 Screenshots for the README come from `DECANT_DEMO=1 DECANT_SHOT=<file.png>` with `DECANT_TAB` per tab: the window is laid out at the `DECANT_WINDOW` size and rendered to the file, which works on a tiny
 virtual display too.

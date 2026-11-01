@@ -21,8 +21,11 @@ public static class LibPlist
             if (!name.StartsWith("plist")) return IntPtr.Zero;
             foreach (var dir in Tools.ToolDirs)
             {
-                var p = Path.Combine(dir, "plist-2.0.dll");
-                if (File.Exists(p) && NativeLibrary.TryLoad(p, out var h)) return h;
+                foreach (var file in new[] { "plist-2.0.dll", "libplist-2.0.dll" })   // vcpkg and MinGW names
+                {
+                    var p = Path.Combine(dir, file);
+                    if (File.Exists(p) && NativeLibrary.TryLoad(p, out var h)) return h;
+                }
             }
             return IntPtr.Zero;
         });

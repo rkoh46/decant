@@ -33,8 +33,11 @@ public sealed class DeviceLink : IDisposable
             if (!name.StartsWith("imobiledevice")) return IntPtr.Zero;
             foreach (var dir in Tools.ToolDirs)
             {
-                var p = Path.Combine(dir, "imobiledevice-1.0.dll");
-                if (File.Exists(p) && NativeLibrary.TryLoad(p, out var h)) return h;
+                foreach (var file in new[] { "imobiledevice-1.0.dll", "libimobiledevice-1.0.dll" })   // vcpkg and MinGW names
+                {
+                    var p = Path.Combine(dir, file);
+                    if (File.Exists(p) && NativeLibrary.TryLoad(p, out var h)) return h;
+                }
             }
             return IntPtr.Zero;
         });
@@ -93,7 +96,7 @@ public sealed class Afc : IDisposable
     DeviceLink? link;
     IntPtr service, client, houseArrest;
 
-    public static bool LibraryPresent => Tools.ToolDirs.Any(d => File.Exists(Path.Combine(d, "imobiledevice-1.0.dll")));
+    public static bool LibraryPresent => Tools.ToolDirs.Any(d => File.Exists(Path.Combine(d, "imobiledevice-1.0.dll")) || File.Exists(Path.Combine(d, "libimobiledevice-1.0.dll")));
 
     /// The Media folder (com.apple.afc): books, DCIM, ringtones, recordings.
     public static Afc? Open(string udid, out string? error)

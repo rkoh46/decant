@@ -82,9 +82,10 @@ Ringtones), Backup (with the backup browser and its exports), Firmware and Tools
 It talks to the phone through the libimobiledevice library and tools, which need Apple's USB driver from the
 **Apple Devices** app (or iTunes). The source and build script are in [windows/](windows/README.md); it is built
 in a Windows 11 ARM virtual machine with `dotnet build`, no Visual Studio needed. No installer yet: unzip and run
-`Decant.exe`. Two things the Windows build cannot do yet: a firmware Update or Restore (idevicerestore has no
-Microsoft-compiler build; the buttons stay disabled until a MinGW build is bundled) and Future Restore
-(futurerestore has no Windows build).
+`Decant.exe`. Update and Restore run through the libimobiledevice project's own Windows builds of idevicerestore
+and irecovery, bundled in `Tools`; a phone in recovery or DFU mode is reached through Apple's driver, so nothing
+has to be swapped with Zadig. One thing the Windows build cannot do yet: Future Restore, because futurerestore no
+longer has a Windows build (its last one dates from 2021).
 
 ## Licence
 

@@ -76,6 +76,7 @@ public sealed partial class FirmwarePage : UserControl, ITabPage
         Page.Children.Add(BlobsSection());
         Page.Children.Add(FirmwareSection());
         Page.Children.Add(RecoveryRow());
+        Page.Children.Add(RestoreReadiness());
         Page.Children.Add(new TextBlock
         {
             Text = "Signed versions can be restored or updated any time. An unsigned version needs a blob saved for it, and the phone's nonce set to the blob's generator (0x1111111111111111), which on A12 and newer chips only a jailbreak can do. Decant saves blobs with that generator so the restore is possible later.",
@@ -213,7 +214,7 @@ public sealed partial class FirmwarePage : UserControl, ITabPage
             else buttons.Children.Add(Rows.Small("Download", () => _ = firmware.DownloadIpsw(fw, Root), !firmware.Running));
             if (signed)
             {
-                var can = Connected && downloaded && !firmware.Running && Tools.Has("idevicerestore");
+                var can = Connected && downloaded && !firmware.Running && Requirements.RestoreBlocker() == null;
                 buttons.Children.Add(Rows.Small("Update…", () => ConfirmRestore(fw, false, false), can));
                 buttons.Children.Add(Rows.Small("Restore…", () => ConfirmRestore(fw, true, false), can));
             }
@@ -247,6 +248,18 @@ public sealed partial class FirmwarePage : UserControl, ITabPage
         log.HorizontalAlignment = HorizontalAlignment.Right;
         g.Children.Add(log);
         return g;
+    }
+
+    /// One quiet line under Recovery: whether Update and Restore can run on this PC, and what to install if not.
+    TextBlock RestoreReadiness()
+    {
+        var blocker = Requirements.RestoreBlocker();
+        return new TextBlock
+        {
+            Text = (blocker == null ? "Restores ready: idevicerestore, irecovery and Apple's USB driver are on this PC" : "Restores unavailable: " + blocker)
+                + (Tools.Has("futurerestore") ? "" : ". Future Restore needs futurerestore.exe, which has no current Windows build"),
+            FontSize = 12, Foreground = Rows.Res("TextFillColorSecondaryBrush"), TextWrapping = TextWrapping.Wrap,
+        };
     }
 
     // MARK: Actions
