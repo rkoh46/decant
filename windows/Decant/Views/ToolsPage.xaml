@@ -1,9 +1,41 @@
 <UserControl
     x:Class="Decant.Views.ToolsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:Decant.Views">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid>
-        <TextBlock Text="Tools" Style="{StaticResource Caption}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <!-- Sidebar: the tools in their sections, as on the Mac. Rows are built in code. -->
+        <Grid Background="{ThemeResource LayerOnMicaBaseAltFillColorDefaultBrush}" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,1,0">
+            <ScrollViewer>
+                <StackPanel x:Name="Sidebar" Padding="8,12" />
+            </ScrollViewer>
+        </Grid>
+        <!-- The selected tool: glyph, title, blurb, its controls, and a footer about the phone's state. -->
+        <ScrollViewer Grid.Column="1">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MaxWidth="808" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+            <StackPanel Padding="24" Spacing="20">
+                <Grid ColumnSpacing="14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="32" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <ContentPresenter x:Name="HeaderIcon" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,2,0,0" />
+                    <StackPanel Grid.Column="1" Spacing="6">
+                        <TextBlock x:Name="Title" FontSize="22" FontWeight="Medium" />
+                        <TextBlock x:Name="Blurb" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
+                <ContentPresenter x:Name="Body" HorizontalContentAlignment="Stretch" />
+                <TextBlock x:Name="Footer" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+            </StackPanel>
+            </Grid>
+        </ScrollViewer>
     </Grid>
 </UserControl>
