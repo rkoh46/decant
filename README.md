@@ -65,19 +65,26 @@ Nothing is tied to a particular drive. Photos default to your Pictures folder, b
 
 ## Windows
 
-Decant for Windows is a native WinUI 3 app with the same layout and the same engine rules as the Mac version. It
-runs on Windows 11 (ARM64 and x64) and covers the Device and Photos tabs for now: the phone as it is, battery
-and storage, and copying or moving the camera roll to any folder with the same byte-count check before a delete.
+Decant for Windows is a native WinUI 3 app with the same seven tabs, the same layout and the same engine rules as
+the Mac version. It runs on Windows 11 (ARM64 and x64). Every tab is there: Device, Photos, Apps, Files (with
+Ringtones), Backup (with the backup browser and its exports), Firmware and Tools.
 
 | Mac | Windows |
 |---|---|
-| ![Device on Mac](docs/device.png) | ![Device on Windows](docs/windows-device.png) |
-| ![Backup on Mac](docs/backup.png) | ![Photos on Windows](docs/windows-photos.png) |
+| ![Device on Mac](docs/mac-device.png) | ![Device on Windows](docs/windows-device.png) |
+| ![Photos on Mac](docs/mac-photos.png) | ![Photos on Windows](docs/windows-photos.png) |
+| ![Apps on Mac](docs/mac-apps.png) | ![Apps on Windows](docs/windows-apps.png) |
+| ![Files on Mac](docs/mac-files.png) | ![Files on Windows](docs/windows-files.png) |
+| ![Backup on Mac](docs/mac-backup.png) | ![Backup on Windows](docs/windows-backup.png) |
+| ![Firmware on Mac](docs/mac-firmware.png) | ![Firmware on Windows](docs/windows-firmware.png) |
+| ![Tools on Mac](docs/mac-tools.png) | ![Tools on Windows](docs/windows-tools.png) |
 
-It talks to the phone through the libimobiledevice tools and library, which need Apple's USB driver from the
+It talks to the phone through the libimobiledevice library and tools, which need Apple's USB driver from the
 **Apple Devices** app (or iTunes). The source and build script are in [windows/](windows/README.md); it is built
 in a Windows 11 ARM virtual machine with `dotnet build`, no Visual Studio needed. No installer yet: unzip and run
-`Decant.exe`.
+`Decant.exe`. Two things the Windows build cannot do yet: a firmware Update or Restore (idevicerestore has no
+Microsoft-compiler build; the buttons stay disabled until a MinGW build is bundled) and Future Restore
+(futurerestore has no Windows build).
 
 ## Licence
 

@@ -105,7 +105,14 @@ public sealed class UsbPhone : IPhone
         return lock_ == null && diag == null ? null : b;
     }
 
-    public Task<List<LargeApp>> LargestApps(CancellationToken ct = default) => Task.FromResult(new List<LargeApp>());   // needs ideviceinstaller; next version
+    /// The Apps tab's service measures every app; the dashboard shows the nine largest from the same pass.
+    public async Task<List<LargeApp>> LargestApps(CancellationToken ct = default)
+    {
+        var svc = Views.AppsPage.Service;
+        if (svc.Apps.Count == 0 && !svc.Loading && !svc.Measuring) await svc.Load(Udid, false);
+        return svc.Apps.Where(a => a.TotalSize > 0).OrderByDescending(a => a.TotalSize).Take(9)
+            .Select(a => new LargeApp { Name = a.Name, Bytes = a.TotalSize }).ToList();
+    }
 
     static readonly string[] imageExt = { ".HEIC", ".JPG", ".JPEG", ".PNG", ".DNG", ".GIF", ".WEBP" };
     static readonly string[] videoExt = { ".MOV", ".MP4", ".M4V" };
