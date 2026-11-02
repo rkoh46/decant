@@ -71,6 +71,8 @@ struct DeviceInfo {
     var manufacturer = "", model = "", version = "", serial = ""
     var modelNumber = "", region = "", udid = "", hardware = "", ecid = "", basebandSerial = "", basebandCert = ""
     var imei = "", imei2 = "", meid = "", wifiAddress = "", bluetoothAddress = ""
+    var activation = ""                 // lockdown ActivationState: Activated / Unactivated
+    var jailbreak: String? = nil        // nil: not checked yet; "": none found; otherwise the jailbreak's name
     var marketingName: String { DeviceInfo.names[model] ?? model }
     static let names: [String: String] = [
         "iPhone12,1": "iPhone 11", "iPhone12,3": "iPhone 11 Pro", "iPhone12,5": "iPhone 11 Pro Max", "iPhone12,8": "iPhone SE (2nd gen)",
@@ -837,11 +839,14 @@ final class DeviceManager: NSObject, ObservableObject {
             let disk = Lockdown.plist("ideviceinfo", args + ["-x", "-q", "com.apple.disk_usage.factory"])
             let diag = Lockdown.plist("idevicediagnostics", args + ["ioregentry", "AppleSmartBattery"])
             let selfTests = Lockdown.plist("idevicediagnostics", args + ["diagnostics", "All"])
+            let jailbreak = Jailbreak.detect(args)
             await MainActor.run {
                 guard let self else { return }
                 self.diagnostics = selfTests
                 if let g = general {
                     var inf = DeviceInfo()
+                    inf.activation = g["ActivationState"] as? String ?? ""
+                    inf.jailbreak = jailbreak
                     inf.manufacturer = "Apple"
                     inf.model = g["ProductType"] as? String ?? ""
                     inf.version = g["ProductVersion"] as? String ?? ""
@@ -1080,5 +1085,33 @@ final class LogFile {
     private func append(_ line: String) {
         guard let data = "\(stamp.string(from: Date()))  \(line)\n".data(using: .utf8) else { return }
         try? handle?.write(contentsOf: data)
+    }
+}
+
+/// Jailbroken or not, the way 3uTools reports it: a stock iPhone never carries a package manager or a jailbreak's
+/// own app, so the user app list from installation_proxy tells. Shared list with the Windows build (Engine/Jailbreak.cs).
+enum Jailbreak {
+    static let known: [(id: String, name: String)] = [
+        ("com.saurik.Cydia", "Cydia"), ("org.coolstar.SileoStore", "Sileo"), ("org.coolstar.SileoNightly", "Sileo"),
+        ("xyz.willy.Zebra", "Zebra"), ("com.opa334.Dopamine", "Dopamine"), ("org.coolstar.taurine", "Taurine"),
+        ("org.coolstar.odyssey", "Odyssey"), ("science.xnu.undecimus", "unc0ver"), ("com.electrateam.chimera", "Chimera"),
+        ("com.coolstar.electra", "Electra"), ("com.palera1n.loader", "palera1n"), ("org.palera1n.palera1n", "palera1n"),
+    ]
+    static let fragments: [(part: String, name: String)] = [("palera1n", "palera1n"), ("checkra1n", "checkra1n"), ("cydia", "Cydia")]
+
+    /// The jailbreak found among the bundle ids, or "" for none.
+    static func name(in ids: [String]) -> String {
+        for id in ids {
+            if let k = known.first(where: { $0.id.caseInsensitiveCompare(id) == .orderedSame }) { return k.name }
+            if let f = fragments.first(where: { id.lowercased().contains($0.part) }) { return f.name }
+        }
+        return ""
+    }
+
+    /// nil when the app list could not be read (not paired, tool missing).
+    static func detect(_ udidArgs: [String]) -> String? {
+        guard let data = Lockdown.run("ideviceinstaller", udidArgs + ["list", "--user", "--xml", "-a", "CFBundleIdentifier"]),
+              let list = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [[String: Any]] else { return nil }
+        return name(in: list.compactMap { $0["CFBundleIdentifier"] as? String })
     }
 }

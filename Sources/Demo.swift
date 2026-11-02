@@ -29,6 +29,7 @@ enum Demo {
         i.imei = "356728113457890"; i.imei2 = "356728113457908"; i.meid = "35672811345789"
         i.wifiAddress = "a4:83:e7:2b:91:0c"; i.bluetoothAddress = "a4:83:e7:2b:91:0d"
         i.basebandSerial = "4f1c0a9b"; i.basebandCert = "3095460737"
+        i.activation = "Activated"; i.jailbreak = ""
         return i
     }
 

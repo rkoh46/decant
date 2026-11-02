@@ -12,6 +12,7 @@ public sealed class DemoPhone : IPhone
     {
         Name = name, Model = "iPhone17,2", Version = "26.1", Serial = "F2LXK9Q1P7M3", ModelNumber = "MYWX3LL/A", Region = "LL/A",
         Udid = Udid, Hardware = "D94AP", Ecid = "1234567890123456", WifiAddress = "a4:83:e7:2b:91:0c", BluetoothAddress = "a4:83:e7:2b:91:0d",
+        Activation = "Activated", Jailbreak = "",
     });
 
     public Task<DeviceStorage?> Storage(CancellationToken ct = default)

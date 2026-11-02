@@ -23,7 +23,7 @@ That is all. Decant finds the phone on its own.
 
 | Tab | What you get |
 |---|---|
-| **Device** | The phone as it is: model, iOS version, serial (hidden until you click the eye), battery level, health, cycle count, charging power, and storage broken down the same way the iPhone's own Settings shows it, with the biggest apps. |
+| **Device** | The phone as it is: model, iOS version, serial (hidden until you click the eye), jailbroken yes or no and activation state like 3uTools, battery level, health, cycle count, charging power, and storage broken down the same way the iPhone's own Settings shows it, with the biggest apps. |
 | **Photos** | The camera roll with thumbnails, filters by year and format, a viewer, and **Copy to Mac** or **Move to Mac**. Every file is checked against the phone before anything is deleted. With iCloud Photos on, deletes go through the Mac's Photos library so iCloud removes them everywhere. |
 | **Apps** | Installed apps with real icons, app and data sizes, developer and App Store date. Sort by size, name or date added. Uninstall, or install a signed `.ipa` by drag and drop. |
 | **Files** | Browse the phone's Media folder (books, downloads, recordings) and the documents of any app that shares files. Upload, download, delete. **Ringtones** lives here too: turn any song, voice memo or video into a tone (pick the start point, 30 or 40 seconds), and it appears in Settings → Sounds & Haptics. |

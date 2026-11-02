@@ -443,6 +443,7 @@ struct DeviceDashboard: View {
                     GridRow { row("iOS version", blank(manager.info?.version)); row("Bluetooth address", blank(manager.info?.bluetoothAddress)) }
                     GridRow { row("Model", blank(manager.info?.model)); row("Model number", modelNumber) }
                     GridRow { serialRow; row("Region", blank(manager.info?.region)) }
+                    GridRow { row("Jailbroken", jailbrokenText); row("Activation", activationText) }
                     GridRow { row("Connection", manager.device == nil ? nil : "USB"); row("Status", manager.device == nil ? nil : manager.statusWord) }
                     GridRow { row("Photos", num(manager.photoCount)); row("Videos", num(manager.videoCount)) }
                     GridRow { row("Live Photos", num(manager.liveCount)); row("Camera roll", manager.device == nil ? nil : DeviceManager.gb(manager.totalBytes)) }
@@ -457,6 +458,20 @@ struct DeviceDashboard: View {
 
     private func blank(_ s: String?) -> String? { (s?.isEmpty ?? true) ? nil : s }
     private func num(_ n: Int) -> String? { manager.device == nil ? nil : n.formatted() }
+
+    /// "No" on a stock phone, "Yes · Sileo" when a jailbreak's app is installed, a dash until the app list was read.
+    private var jailbrokenText: String? {
+        guard let jb = manager.info?.jailbreak else { return nil }
+        return jb.isEmpty ? "No" : "Yes · \(jb)"
+    }
+    private var activationText: String? {
+        switch manager.info?.activation {
+        case nil, "": return nil
+        case "Activated": return "Activated"
+        case "Unactivated": return "Not activated"
+        case let s?: return s
+        }
+    }
 
     private var modelNumber: String? {
         guard let i = manager.info, !i.modelNumber.isEmpty else { return nil }

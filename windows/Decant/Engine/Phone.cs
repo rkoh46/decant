@@ -52,12 +52,14 @@ public sealed class UsbPhone : IPhone
         var g = await Lockdown(null, ct);
         if (g == null) return null;
         string S(string k) => Plist.Str(g.GetValueOrDefault(k));
+        var jailbreak = await Task.Run(() => Engine.Jailbreak.Detect(Udid), ct);
         return new DeviceInfo
         {
             Name = S("DeviceName"), Model = S("ProductType"), Version = S("ProductVersion"), Serial = S("SerialNumber"),
             ModelNumber = S("ModelNumber"), Region = S("RegionInfo"), Udid = Udid, Hardware = S("HardwareModel"),
             Ecid = Plist.Long(g.GetValueOrDefault("UniqueChipID"))?.ToString() ?? "",
             WifiAddress = S("WiFiAddress"), BluetoothAddress = S("BluetoothAddress"),
+            Activation = S("ActivationState"), Jailbreak = jailbreak,
         };
     }
 

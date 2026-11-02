@@ -5,6 +5,8 @@ public sealed class DeviceInfo
 {
     public string Name = "", Model = "", Version = "", Serial = "", ModelNumber = "", Region = "", Udid = "", Hardware = "", Ecid = "";
     public string WifiAddress = "", BluetoothAddress = "";
+    public string Activation = "";          // lockdown ActivationState: Activated / Unactivated
+    public string? Jailbreak;               // null: not checked; "": none found; otherwise the jailbreak's name
     public string MarketingName => Names.TryGetValue(Model, out var n) ? n : Model;
 
     public static readonly Dictionary<string, string> Names = new()

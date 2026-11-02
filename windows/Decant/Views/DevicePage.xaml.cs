@@ -71,13 +71,13 @@ public sealed partial class DevicePage : UserControl, ITabPage
         Table(InfoLeft, new[]
         {
             ("Device name", i.Name), ("iOS version", i.Version), ("Model", i.Model), ("Serial number", Mask(i.Serial)),
-            ("Connection", "USB"), ("Photos", Format.Count(s.PhotoCount)), ("Live Photos", Format.Count(s.LiveCount)),
+            ("Jailbroken", i.Jailbreak == null ? "" : i.Jailbreak.Length == 0 ? "No" : $"Yes · {i.Jailbreak}"), ("Connection", "USB"), ("Photos", Format.Count(s.PhotoCount)), ("Live Photos", Format.Count(s.LiveCount)),
         });
         if (i.Serial.Length > 0) SerialRow(InfoLeft, 3, i.Serial);
         Table(InfoRight, new[]
         {
             ("Wi-Fi address", i.WifiAddress), ("Bluetooth address", i.BluetoothAddress), ("Model number", i.ModelNumber), ("Region", i.Region),
-            ("Status", s.Status), ("Videos", Format.Count(s.VideoCount)), ("Camera roll", Format.Gb(s.TotalBytes)),
+            ("Activation", i.Activation == "Activated" ? "Activated" : i.Activation == "Unactivated" ? "Not activated" : i.Activation), ("Status", s.Status), ("Videos", Format.Count(s.VideoCount)), ("Camera roll", Format.Gb(s.TotalBytes)),
         });
 
         var b = s.Battery;
