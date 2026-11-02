@@ -3,8 +3,23 @@ import ImageCaptureCore
 import AVKit
 import Photos
 
+/// A click on the Dock icon sends a reopen. SwiftUI only answers it when no window is left, so a main window that was
+/// minimised, hidden or left on another Space or display stayed where it was and the app looked stuck in the background.
+final class DockReopen: NSObject, NSApplicationDelegate {
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        let main = NSApp.windows.first { $0.title == "Decant" && $0.canBecomeMain }
+            ?? NSApp.windows.first { $0.canBecomeMain && !$0.title.isEmpty }
+        guard let window = main else { return true }   // nothing left: let SwiftUI make a new main window
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate()
+        return false
+    }
+}
+
 @main
 struct DecantApp: App {
+    @NSApplicationDelegateAdaptor(DockReopen.self) private var dockReopen
     @StateObject private var manager = DeviceManager()
     @StateObject private var backups = BackupService()
     @StateObject private var firmware = FirmwareService()
