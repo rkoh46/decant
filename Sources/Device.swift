@@ -916,8 +916,11 @@ final class DeviceManager: NSObject, ObservableObject {
     static func freeSpace(at url: URL) -> Int? {
         var u = url
         while !FileManager.default.fileExists(atPath: u.path), u.pathComponents.count > 1 { u = u.deletingLastPathComponent() }
-        let values = try? u.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        return values?.volumeAvailableCapacityForImportantUsage.map(Int.init)
+        // The "important usage" figure counts purgeable space, but only on the Mac's own volume; an external drive
+        // answers 0 there, which showed as "0 KB free" and failed the space check before a copy.
+        let values = try? u.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
+        if let important = values?.volumeAvailableCapacityForImportantUsage, important > 0 { return Int(important) }
+        return values?.volumeAvailableCapacity
     }
 }
 
