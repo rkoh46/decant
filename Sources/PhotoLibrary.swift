@@ -19,11 +19,21 @@ enum PhotoLibraryDeleter {
         let wanted = Set(items.map { $0.name.lowercased() })
         // One pass over the library, collecting assets whose original filename we are looking for.
         var byName: [String: [PHAsset]] = [:]
+        // Photos saved by another app (Ray-Ban Meta glasses, WhatsApp...) reach iCloud under that app's own filename
+        // and sometimes with a timestamp shifted by a whole time zone, so neither name nor date finds them. The
+        // original's byte size together with its pixel size does: index the library by that as well.
+        let wantedSizes = Set(items.map { $0.size })
+        var bySize: [Int: [PHAsset]] = [:]
         let options = PHFetchOptions()
         options.includeHiddenAssets = true
         PHAsset.fetchAssets(with: options).enumerateObjects { asset, _, _ in
-            for r in PHAssetResource.assetResources(for: asset) where wanted.contains(r.originalFilename.lowercased()) {
+            let resources = PHAssetResource.assetResources(for: asset)
+            for r in resources where wanted.contains(r.originalFilename.lowercased()) {
                 byName[r.originalFilename.lowercased(), default: []].append(asset); break
+            }
+            if let original = resources.first(where: { $0.type == .photo || $0.type == .video || $0.type == .fullSizePhoto || $0.type == .fullSizeVideo }) ?? resources.first,
+               let size = original.value(forKey: "fileSize") as? Int, wantedSizes.contains(size) {
+                bySize[size, default: []].append(asset)
             }
         }
         for item in items {
@@ -36,10 +46,18 @@ enum PhotoLibraryDeleter {
                 continue
             }
             // Saved and shared images keep a different filename in Photos: fall back to the same pixel size
-            // captured within a minute of the phone's date.
-            if let asset = matchByShape(item) { found[item] = asset } else { missing.append(item) }
+            // captured within a minute of the phone's date, then to the same byte size and pixel size (any date).
+            if let asset = matchByShape(item) ?? matchBySize(item, bySize[item.size] ?? []) { found[item] = asset } else { missing.append(item) }
         }
         return (found, missing)
+    }
+
+    nonisolated private static func matchBySize(_ item: MediaItem, _ candidates: [PHAsset]) -> PHAsset? {
+        guard item.size > 0, item.pixelWidth > 0 else { return nil }
+        let same = candidates.filter { $0.pixelWidth == item.pixelWidth && $0.pixelHeight == item.pixelHeight && $0.mediaType == (item.isVideo ? .video : .image) }
+        guard !same.isEmpty else { return nil }
+        guard let date = item.date else { return same.count == 1 ? same[0] : nil }
+        return same.min { a, b in abs((a.creationDate ?? .distantPast).timeIntervalSince(date)) < abs((b.creationDate ?? .distantPast).timeIntervalSince(date)) }
     }
 
     nonisolated private static func matchByShape(_ item: MediaItem) -> PHAsset? {

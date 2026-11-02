@@ -1082,22 +1082,26 @@ struct PhotosPane: View {
                 Button("Stop") { manager.cancel() }
             } else {
                 Text("Import to").foregroundStyle(.secondary)
+                // The folder name is the one thing allowed to shorten; every other label keeps its full text at the
+                // 1000 pt minimum width, where the toggle used to wrap onto three lines and the counts were cut off.
                 Button(action: chooseFolder) {
-                    Label(destURL?.lastPathComponent ?? "Choose Folder…", systemImage: "folder")
+                    Label(destURL?.lastPathComponent ?? "Choose Folder…", systemImage: "folder").lineLimit(1).truncationMode(.middle)
                 }
+                .frame(maxWidth: 200)
                 if let url = destURL, let free = DeviceManager.freeSpace(at: url) {
-                    Text("\(DeviceManager.gb(free)) free").font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                    Text("\(DeviceManager.gb(free)) free").font(.callout).foregroundStyle(.secondary).monospacedDigit().fixedSize()
                 }
                 if let summary = manager.summary {
                     Divider().frame(height: 16)
-                    Text(summary).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                    Text(summary).font(.callout).foregroundStyle(.secondary).lineLimit(1).fixedSize()
                     if let url = destURL {
-                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }.buttonStyle(.link)
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }.buttonStyle(.link).fixedSize()
                     }
                 }
-                Spacer()
-                Toggle(manager.canDelete ? "Delete after import" : "Delete via iCloud after import", isOn: $deleteAfterCopy)
-                    .help(manager.canDelete ? "" : "iCloud Photos is on: deletes go through the Photos library on this Mac and sync to the iPhone")
+                Spacer(minLength: 12)
+                Toggle("Delete after import", isOn: $deleteAfterCopy).fixedSize()
+                    .help(manager.canDelete ? "Removes each item from the iPhone once its copy is verified"
+                                            : "iCloud Photos is on: deletes go through the Photos library on this Mac and sync to the iPhone")
                 Button(action: start) {
                     Text(copyButtonTitle).frame(minWidth: 120)
                 }
