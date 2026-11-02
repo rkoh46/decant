@@ -1093,7 +1093,9 @@ struct PhotosPane: View {
                 }
                 if let summary = manager.summary {
                     Divider().frame(height: 16)
-                    Text(summary).font(.callout).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                    // The summary is the one long text here: it shortens with an ellipsis, never pushes the bar past the window.
+                    Text(summary).font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail).layoutPriority(-1)
+                        .help(summary)
                     if let url = destURL {
                         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }.buttonStyle(.link).fixedSize()
                     }
