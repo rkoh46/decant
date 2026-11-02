@@ -40,10 +40,14 @@ build() {
 build
 case "${1:-}" in
   install)
+    # Quit through LaunchServices and let it finish before the bundle is swapped: killing the process while the
+    # app at that path disappears left the Dock with a stale tile that no longer brought Decant forward.
+    osascript -e 'tell application id "local.decant" to quit' 2>/dev/null || true
+    for _ in $(seq 1 50); do pgrep -xq Decant || break; sleep 0.1; done
     pkill -x Decant 2>/dev/null || true
-    rm -rf /Applications/Decant.app
-    cp -R "$BUILD" /Applications/Decant.app
+    rsync -a --delete "$BUILD/" /Applications/Decant.app/
     codesign --force -s - /Applications/Decant.app
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/Decant.app
     echo ">> installed /Applications/Decant.app"
     ;;
   run)
