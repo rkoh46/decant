@@ -60,7 +60,8 @@ Nothing is tied to a particular drive. Photos default to your Pictures folder, b
 ./release.sh 1.0.0      # bundles the device tools and makes dist/Decant-1.0.0.dmg
 ```
 
-`DECANT_DEMO=1` launches the app with a sample iPhone for screenshots. Design rules for contributors are in
+`DECANT_DEMO=1` launches the app with a sample iPhone for screenshots. Everything the Log window shows is also written to
+`~/Library/Logs/Decant/decant.log` (`DECANT_LOG=<file>` moves it), so a move can be checked after the fact. Design rules for contributors are in
 [DESIGN.md](DESIGN.md); what is planned next in [ROADMAP.md](ROADMAP.md).
 
 ## Windows

@@ -429,6 +429,7 @@ final class DeviceManager: NSObject, ObservableObject {
     func addLog(_ line: String) {
         let t = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         NSLog("%@", line)                       // mirrored to the system log for diagnosis
+        LogFile.shared.write(line)              // and to ~/Library/Logs/Decant/decant.log, so a run can be checked afterwards
         let entry = "\(t)  \(line)"
         if Thread.isMainThread { pendingLog.append(entry); scheduleLogFlush() }
         else { DispatchQueue.main.async { self.pendingLog.append(entry); self.scheduleLogFlush() } }
@@ -1039,5 +1040,45 @@ extension DeviceManager: ICCameraDeviceDelegate {
         if let d = self.device {
             if d.hasOpenSession { queryDetails(d) } else { d.requestOpenSession() }
         }
+    }
+}
+
+/// The log on disk: `~/Library/Logs/Decant/decant.log` (or `DECANT_LOG=<file>`, as on Windows), one dated line per
+/// entry, written on its own queue so the move never waits for the disk. Rolls to `decant.log.1` past 5 MB.
+final class LogFile {
+    static let shared = LogFile()
+    static let url: URL = {
+        if let p = ProcessInfo.processInfo.environment["DECANT_LOG"], !p.isEmpty { return URL(fileURLWithPath: p) }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Decant/decant.log")
+    }()
+    private let queue = DispatchQueue(label: "decant.log", qos: .utility)
+    private var handle: FileHandle?
+    private let stamp: DateFormatter = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"; return f }()
+
+    private init() {
+        queue.async { [self] in
+            open()
+            append("---- Decant \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") started, macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
+        }
+    }
+
+    func write(_ line: String) { queue.async { [self] in append(line) } }
+
+    private func open() {
+        let url = Self.url
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int, size > 5_000_000 {
+            let old = url.deletingPathExtension().appendingPathExtension("log.1")
+            try? FileManager.default.removeItem(at: old)
+            try? FileManager.default.moveItem(at: url, to: old)
+        }
+        if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil) }
+        handle = try? FileHandle(forWritingTo: url)
+        _ = try? handle?.seekToEnd()
+    }
+
+    private func append(_ line: String) {
+        guard let data = "\(stamp.string(from: Date()))  \(line)\n".data(using: .utf8) else { return }
+        try? handle?.write(contentsOf: data)
     }
 }
