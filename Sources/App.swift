@@ -6,6 +6,28 @@ import Photos
 /// A click on the Dock icon sends a reopen. SwiftUI only answers it when no window is left, so a main window that was
 /// minimised, hidden or left on another Space or display stayed where it was and the app looked stuck in the background.
 final class DockReopen: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        DispatchQueue.global(qos: .utility).async { Tools.reapOrphans() }
+        if CommandLine.arguments.contains("--test-watchdog") { Task { @MainActor in await Self.testWatchdog() } }
+    }
+
+    /// `Decant --test-watchdog`: a busy loop stands in for an idevicebackup2 whose phone was unplugged. The watchdog
+    /// must stop it; a second one left running must not outlive the app (the caller checks that pid after the quit).
+    @MainActor private static func testWatchdog() async {
+        let t0 = Date(); var gaveUp = false
+        let status = await Tools.stream("/bin/sh", ["-c", "while :; do :; done"], alive: { false }, graceSeconds: 5,
+                                        onGiveUp: { gaveUp = true }) { _ in }
+        print("WATCHDOG stopped=\(gaveUp) status=\(status.map(String.init) ?? "nil") after \(Int(Date().timeIntervalSince(t0))) s")
+        var pid: Int32 = 0
+        Task { _ = await Tools.stream("/bin/sh", ["-c", "while :; do :; done"], register: { pid = $0.processIdentifier }) { _ in } }
+        while pid == 0 { try? await Task.sleep(nanoseconds: 50_000_000) }
+        print("QUIT leaving pid \(pid) running"); fflush(stdout)
+        NSApp.terminate(nil)
+    }
+
+    /// Backups and restores run as child processes, which macOS leaves running when the app quits.
+    func applicationWillTerminate(_ notification: Notification) { Tools.stopAll() }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         let main = NSApp.windows.first { $0.title == "Decant" && $0.canBecomeMain }
             ?? NSApp.windows.first { $0.canBecomeMain && !$0.title.isEmpty }

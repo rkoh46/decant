@@ -189,12 +189,13 @@ public sealed class BackupService
         var args = new List<string>();
         if (network) args.Add("-n");
         args.AddRange(new[] { "-u", udid, "backup", "--full", dest });
+        var lostPhone = false;
         var code = await ToolsStream.Stream("idevicebackup2", args, line =>
         {
             if (ToolsStream.Percent(line) is double p) { Progress = p; Notify(); } else Log(line);
-        }, register: p => process = p);
+        }, register: p => process = p, alive: () => Tools.DeviceListed(udid, network), onGiveUp: () => lostPhone = true);
         process = null;
-        Phase = code == 0 ? "Backup finished" : "Backup failed";
+        Phase = code == 0 ? "Backup finished" : lostPhone ? "Backup stopped: the iPhone was disconnected" : "Backup failed";
         Log(Phase);
         Running = false; Notify();
         Scan(root);
@@ -208,12 +209,13 @@ public sealed class BackupService
         var args = new List<string> { "-u", udid, "restore", "--system", "--settings", "--reboot" };
         if (password != null) { args.Add("--password"); args.Add(password); }
         args.Add(System.IO.Path.GetDirectoryName(backup.Path) ?? backup.Path);
+        var lostPhone = false;
         var code = await ToolsStream.Stream("idevicebackup2", args, line =>
         {
             if (ToolsStream.Percent(line) is double p) { Progress = p; Notify(); } else Log(line);
-        }, register: p => process = p);
+        }, register: p => process = p, alive: () => Tools.DeviceListed(udid, false), graceSeconds: 45, onGiveUp: () => lostPhone = true);
         process = null;
-        Phase = code == 0 ? "Restore finished, the iPhone is rebooting" : "Restore failed";
+        Phase = code == 0 ? "Restore finished, the iPhone is rebooting" : lostPhone ? "Restore stopped: the iPhone was disconnected" : "Restore failed";
         Log(Phase);
         Running = false; Notify();
     }

@@ -10,6 +10,7 @@ import Compression
 enum Tools {
     /// Bundled copies first (Contents/Helpers), then Homebrew, then the repo's vendor folder while developing.
     static func path(_ name: String) -> String? {
+        if name.hasPrefix("/") { return FileManager.default.isExecutableFile(atPath: name) ? name : nil }
         var candidates = [Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/\(name)").path,
                           "/opt/homebrew/bin/\(name)", "/usr/local/bin/\(name)"]
         let vendor = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Decant/vendor")
@@ -24,11 +25,58 @@ enum Tools {
 
     static func has(_ name: String) -> Bool { path(name) != nil }
 
+    /// Every tool Decant started that is still running, so quitting can stop them. A child process outlives its
+    /// parent on macOS: an idevicebackup2 left behind when Decant quit mid-backup kept a CPU core at 100% for days.
+    nonisolated(unsafe) private static var live = Set<Process>()
+    private static let liveLock = NSLock()
+
+    /// Stops every tool still running (Decant is quitting). SIGTERM first, SIGKILL for anything still there 2 s later.
+    static func stopAll() {
+        liveLock.lock(); let running = live.filter(\.isRunning); liveLock.unlock()
+        for p in running { p.terminate() }
+        let deadline = Date().addingTimeInterval(2)
+        while running.contains(where: \.isRunning) && Date() < deadline { usleep(50_000) }
+        for p in running where p.isRunning { kill(p.processIdentifier, SIGKILL) }
+    }
+
+    /// At launch: stops idevicebackup2 processes whose parent is gone (left by an earlier Decant that crashed or
+    /// was force quit). They no longer report to anyone, and one whose phone was unplugged spins at 100% CPU.
+    static func reapOrphans() {
+        let ps = Process()
+        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+        ps.arguments = ["-axo", "pid=,ppid=,uid=,comm="]
+        let out = Pipe(); ps.standardOutput = out; ps.standardError = FileHandle.nullDevice
+        guard (try? ps.run()) != nil else { return }
+        let data = out.fileHandleForReading.readDataToEndOfFile(); ps.waitUntilExit()
+        let me = getuid()
+        for row in String(decoding: data, as: UTF8.self).split(separator: "\n") {
+            let f = row.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
+            guard f.count == 4, let pid = Int32(f[0]), f[1] == "1", UInt32(f[2]) == me,
+                  (f[3] as NSString).lastPathComponent == "idevicebackup2" else { continue }
+            kill(pid, SIGTERM)
+        }
+    }
+
+    /// Whether the phone with this UDID is still listed by usbmuxd (USB, or Wi-Fi when `network`).
+    static func deviceListed(_ udid: String, network: Bool) -> Bool {
+        guard let path = path("idevice_id") else { return true }   // cannot tell: never stop a job on a guess
+        let p = Process(); p.executableURL = URL(fileURLWithPath: path); p.arguments = [network ? "-n" : "-l"]
+        let out = Pipe(); p.standardOutput = out; p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return true }
+        let data = out.fileHandleForReading.readDataToEndOfFile(); p.waitUntilExit()
+        return String(decoding: data, as: UTF8.self).contains(udid)
+    }
+
     /// Run a tool, streaming each output line (stdout and stderr merged) as it arrives. Returns the exit status,
     /// or nil when the tool is missing. `register` receives the Process so a caller can terminate it.
     @discardableResult
+    /// `alive`, when given, is asked every 5 s whether the job can still make progress (the phone is still there);
+    /// after `graceSeconds` of "no" the tool is stopped. idevicebackup2 does not exit when the phone is unplugged:
+    /// it retries in a tight loop at 100% CPU forever.
     static func stream(_ name: String, _ args: [String], input: String? = nil,
-                       register: ((Process) -> Void)? = nil, line: @escaping (String) -> Void) async -> Int32? {
+                       register: ((Process) -> Void)? = nil,
+                       alive: (@Sendable () -> Bool)? = nil, graceSeconds: Double = 20, onGiveUp: (() -> Void)? = nil,
+                       line: @escaping (String) -> Void) async -> Int32? {
         guard let path = path(name) else { line("\(name) is not installed"); return nil }
         return await withCheckedContinuation { cont in
             let p = Process()
@@ -53,11 +101,40 @@ enum Tools {
                 }
             }
             p.terminationHandler = { proc in
+                liveLock.lock(); live.remove(proc); liveLock.unlock()
                 pipe.fileHandleForReading.readabilityHandler = nil
                 if let s = String(data: buffer, encoding: .utf8), !s.trimmingCharacters(in: .whitespaces).isEmpty { line(s) }
                 cont.resume(returning: proc.terminationStatus)
             }
-            do { try p.run(); register?(p) } catch { line("could not start \(name): \(error.localizedDescription)"); cont.resume(returning: nil) }
+            do {
+                try p.run()
+                liveLock.lock(); live.insert(p); liveLock.unlock()
+                register?(p)
+                if let alive { watch(p, alive: alive, grace: graceSeconds, onGiveUp: onGiveUp) }
+            } catch { line("could not start \(name): \(error.localizedDescription)"); cont.resume(returning: nil) }
+        }
+    }
+
+    /// Polls `alive` every 5 s off the main thread; once it has said "no" for `grace` seconds in a row, stops the
+    /// process (SIGTERM, then SIGKILL 5 s later if it ignores that).
+    private static func watch(_ p: Process, alive: @escaping @Sendable () -> Bool, grace: Double, onGiveUp: (() -> Void)?) {
+        let box = UncheckedProcess(p)
+        let giveUp = onGiveUp.map { UncheckedAction($0) }
+        Thread.detachNewThread {
+            var goneSince: Date?
+            while box.p.isRunning {
+                Thread.sleep(forTimeInterval: 5)
+                guard box.p.isRunning else { return }
+                if alive() { goneSince = nil; continue }
+                let since = goneSince ?? Date(); goneSince = since
+                guard Date().timeIntervalSince(since) >= grace else { continue }
+                if let giveUp { DispatchQueue.main.async { giveUp.run() } }
+                box.p.terminate()
+                let deadline = Date().addingTimeInterval(5)
+                while box.p.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+                if box.p.isRunning { kill(box.p.processIdentifier, SIGKILL) }
+                return
+            }
         }
     }
 
@@ -66,6 +143,9 @@ enum Tools {
         return Double(line[r].dropLast()).map { $0 / 100 }
     }
 }
+
+private final class UncheckedProcess: @unchecked Sendable { let p: Process; init(_ p: Process) { self.p = p } }
+private final class UncheckedAction: @unchecked Sendable { let run: () -> Void; init(_ r: @escaping () -> Void) { run = r } }
 
 // MARK: - BuildManifest straight out of a remote IPSW (HTTP ranges, so 12 GB is never downloaded)
 
@@ -322,12 +402,15 @@ final class BackupService: ObservableObject {
         try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
         log("Backup to \(dest.path)\(network ? " over Wi-Fi" : "")")
         phase = network ? "Backing up over Wi-Fi" : "Backing up"
+        var lostPhone = false
         let status = await Tools.stream("idevicebackup2", (network ? ["-n"] : []) + ["-u", udid, "backup", "--full", dest.path],
-                                        register: { [weak self] p in self?.process = p }) { [weak self] l in
+                                        register: { [weak self] p in self?.process = p },
+                                        alive: { Tools.deviceListed(udid, network: network) },
+                                        onGiveUp: { lostPhone = true }) { [weak self] l in
             guard let self else { return }
             if let pct = Tools.percent(in: l) { self.progress = pct } else { self.log(l) }
         }
-        phase = status == 0 ? "Backup finished" : "Backup failed"
+        phase = status == 0 ? "Backup finished" : lostPhone ? "Backup stopped: the iPhone was disconnected" : "Backup failed"
         log(phase)
         running = false; process = nil
         scan(root)
@@ -342,11 +425,14 @@ final class BackupService: ObservableObject {
         if let password, !password.isEmpty { args += ["--password", password] }
         // idevicebackup2 expects the folder that contains the <UDID> folder.
         args.append(backup.url.deletingLastPathComponent().path)
-        let status = await Tools.stream("idevicebackup2", args, register: { [weak self] p in self?.process = p }) { [weak self] l in
+        var lostPhone = false
+        let status = await Tools.stream("idevicebackup2", args, register: { [weak self] p in self?.process = p },
+                                        alive: { Tools.deviceListed(udid, network: false) }, graceSeconds: 45,
+                                        onGiveUp: { lostPhone = true }) { [weak self] l in
             guard let self else { return }
             if let pct = Tools.percent(in: l) { self.progress = pct } else { self.log(l) }
         }
-        phase = status == 0 ? "Restore finished, the iPhone is rebooting" : "Restore failed"
+        phase = status == 0 ? "Restore finished, the iPhone is rebooting" : lostPhone ? "Restore stopped: the iPhone was disconnected" : "Restore failed"
         log(phase)
         running = false; process = nil
     }
